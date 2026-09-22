@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Copywriter</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+<style>html,body{margin:0;padding:0}#gate{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1b0f2e;color:#F4EEE2;font-family:system-ui,sans-serif;font-size:15px}</style>
+</head>
+<body>
+<div id="gate">Checking your session…</div>
+<div id="root"></div>
+
+<script>
+// ── TODO: fill these in from your Supabase project settings ──
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+window.__SB_SESSION__ = null;
+
+sb.auth.getSession().then(({ data }) => {
+  if (!data.session) {
+    window.location.href = "login.html";
+    return;
+  }
+  window.__SB_SESSION__ = data.session;
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("root").style.display = "block";
+});
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useRef } = React;
+
+
+// ---------------------------------------------------------------------------
+// Prolanz Copywriter (consolidated + grounded)
+// ONE "Analyse this niche" pull (Markifact Meta ad library, country-locked)
+// returns: winning BRANDS, winning OFFERS, PRICE points, AUDIENCE angle.
+// You pick a brand to model + tap an offer to use, then write copy modeled
+// on live winners. No second pull at generation time = fewer calls / less
+// quota burn.
+// ---------------------------------------------------------------------------
+
+const COPY_TYPES = [
+  { id: "meta_ad", label: "Meta ad copy" },
+  { id: "vsl", label: "Ads script (VSL)" },
+  { id: "flyer", label: "Flyer copy" },
+  { id: "landing", label: "Landing page copy" },
+  { id: "website", label: "Website copy" },
+  { id: "product", label: "Product description" },
+  { id: "email", label: "Promo email" },
+  { id: "whatsapp", label: "WhatsApp / DM" },
+  { id: "caption", label: "Social caption" },
+  { id: "headline", label: "Headlines & hooks" },
+];
+const TYPE_LABEL = Object.fromEntries(COPY_TYPES.map((t) => [t.id, t.label]));
+
+const TONES = [
+  "Naija / Pidgin",
+  "Bold / Direct",
+  "Playful",
+  "Funny / Witty",
+  "Luxury",
+  "Premium / Aspirational",
+  "Urgent",
+  "Hype / High-energy",
+  "Warm / Friendly",
+  "Empathetic",
+  "Authoritative",
+  "Professional",
+];
+
+const MODEL_CANDIDATES = [
+  "claude-sonnet-4-6",
+  "claude-sonnet-5",
+  "claude-3-5-sonnet-20241022",
+];
+
+const MARKIFACT = {
+  type: "url",
+  url: "https://api.markifact.com/mcp",
+  name: "markifact",
+};
+
+const BRAND = `You are the senior direct-response copywriter at PROLANZ DIGITALS, a Nigerian creative & marketing agency writing high-converting, on-brand copy for client brands.
+- You know the Nigerian market: WhatsApp-led selling, prices in ₦, pidgin/slang when tone calls for it.
+- You use proven frameworks under the hood (AIDA, PAS, Before-After-Bridge, FAB) but NEVER label them in the copy.
+- You write ONLY from proven, currently-winning structures — never generic filler. Copy is specific, benefit-led, and ends with exactly ONE CTA — never two, no secondary or repeated call to action anywhere in the piece.
+- Each variation takes a genuinely DIFFERENT angle from the winners provided.`;
+
+const PLAYBOOK = `OUTPUT SHAPE BY COPY TYPE — return blocks that match the type:
+- meta_ad: blocks [{label:"PRIMARY TEXT", text},{label:"HEADLINE", text},{label:"CTA", text}].
+- vsl: an Ads Script / Video Sales Letter, HARD CAP 50 seconds (~130-150 words). blocks [{label:"3 HOOK OPTIONS", items:[3 distinct pattern-interrupt hooks]},{label:"SCRIPT", items:[the script beats IN THE ORDER AND STYLE THE MODELED WINNER USES — each beat one short line; if NO winner is being modeled, default to Hook, Offer Teaser, Anchor, Problem, Agitation, Solution, Proof, Offer, CTA]},{label:"RUNTIME", text:"word count + est. seconds (<= 50s)"},{label:"PRODUCTION NOTES", text:"pacing / retention + recommended creative type"}].
+- flyer: blocks [{label:"HEADLINE", text},{label:"SUBHEAD", text},{label:"KEY POINTS", items:[3-5]},{label:"OFFER", text},{label:"CTA", text},{label:"DETAILS", text}].
+- landing: a full landing page. Its SECTIONS depend on whether it's PRODUCT-based or SERVICE-based — follow the LANDING SPEC given in the prompt. ALWAYS include a form section with the actual fields. Repeated CTA buttons are fine but must ALL drive the SAME single action (the form).
+- website: full multi-section site copy. blocks [{label:"HERO HEADLINE", text},{label:"SUBHEAD", text},{label:"WHAT WE DO", text},{label:"BENEFITS", items:[3-5]},{label:"WHY US", text},{label:"CTA", text}].
+- product: blocks [{label:"DESCRIPTION", text},{label:"KEY FEATURES", items:[3-5]}].
+- email: blocks [{label:"SUBJECT LINES", items:[3]},{label:"BODY", text},{label:"CTA", text}].
+- whatsapp: blocks [{label:"MESSAGE", text}].
+- caption: blocks [{label:"CAPTION", text},{label:"HASHTAGS", text}].
+- headline: blocks [{label:"HEADLINES", items:[6]}].`;
+
+const OPTIMIZE_GUIDE = `OPTIMIZATION RULES (Prolanz v5.6 — hold the copy to ALL of these):
+STRUCTURE: keep the structure of the copy you are optimizing (it's modeled on a winning brand) — do NOT force a different template onto it. Tighten what's there; add a missing critical beat only if truly needed. Scripts/VSL stay under 50s (~130-150 words).
+OFFER ASSESSMENT (do this FIRST): rate the offer strong / moderate / weak for cold traffic and say why in plain language. Check: (1) is the saving meaningful (naira, ~20%+)? (2) is urgency real, not invented? (3) is there a concrete guarantee for spend over ₦10k? (4) is it ONE offer only? (5) does the offer remove the TAM's single biggest objection? Flag every weak element and suggest a concrete fix. Never invent urgency, scarcity, or numbers.
+TAM: lock ONE highest-value buyer — no blended audience.
+HOOK: 3 distinct pattern-interrupt variations; prices in NAIRA, not percentages.
+ANCHOR: mandatory, ONE sentence immediately after the hook — pattern "By the end of this, you'll know exactly how [mechanism] gets you [outcome] — without [biggest objection]." Never reveal product name or price; never skip or merge it with the hook.
+AGITATION: one line maximum.
+SOLUTION: any address goes here as a trust signal — never near the CTA.
+PROOF: concrete guarantee (refund / replace / money-back); real results only, no invented numbers.
+OFFER: one offer, explicit naira price.
+CTA: exactly ONE CTA in the whole piece — never two; it stands alone with nothing after it.
+HARD RULES: no hedging, no filler/throat-clearing, no fake scarcity; use pay-on-delivery and Nigerian trust signals where relevant; plain cold-traffic language.
+SELF-CHECK before output: TAM locked; offer assessed with fixes; 3 hooks; anchor present, one sentence, correctly placed; agitation one line; address only in solution; guarantee concrete; one offer only; CTA alone; within 50s; all claims verified.`;
+
+async function callClaude(messages, model, mcpServers, maxTokens) {
+  const body = { model, max_tokens: maxTokens || 1000, messages, tool: "copywriter" };
+  if (mcpServers) body.mcp_servers = mcpServers;
+  const token = (window.__SB_SESSION__ && window.__SB_SESSION__.access_token) || "";
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token,
+    },
+    body: JSON.stringify(body),
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (e) {
+    /* non-JSON */
+  }
+  if (!res.ok) {
+    const msg = (data && data.error) || "HTTP " + res.status;
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return (data.content || [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+}
+async function withRetry(fn, tries = 2) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+function parseObj(raw) {
+  let t = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const s = t.indexOf("{"),
+    e = t.lastIndexOf("}");
+  if (s !== -1 && e !== -1) t = t.slice(s, e + 1);
+  return JSON.parse(t);
+}
+
+// Repairs a truncated JSON string by closing any open string/brackets.
+function repairJson(t) {
+  const stack = [];
+  let inStr = false,
+    esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{") stack.push("}");
+    else if (c === "[") stack.push("]");
+    else if (c === "}" || c === "]") stack.pop();
+  }
+  let out = t;
+  if (inStr) out += '"';
+  out = out.replace(/,\s*$/, "");
+  while (stack.length) out += stack.pop();
+  return out;
+}
+
+// Tolerant parse: tries clean JSON, then a repaired version.
+function parseObjSafe(raw) {
+  let t = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const s = t.indexOf("{");
+  if (s === -1) throw new Error("No JSON in response.");
+  t = t.slice(s);
+  const e = t.lastIndexOf("}");
+  const candidate = e !== -1 ? t.slice(0, e + 1) : t;
+  try {
+    return JSON.parse(candidate);
+  } catch (_) {}
+  try {
+    return JSON.parse(repairJson(t));
+  } catch (_) {
+    throw new Error("The optimizer returned an incomplete result — tap Optimize again.");
+  }
+}
+
+function fallbackCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+function copyText(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+      return true;
+    }
+  } catch (_) {}
+  return fallbackCopy(text);
+}
+
+function copyToText(item) {
+  const lines = [];
+  if (item.label) lines.push(`[${item.label}]`);
+  (item.blocks || []).forEach((b) => {
+    lines.push("");
+    lines.push(b.label);
+    if (Array.isArray(b.items)) b.items.forEach((it) => lines.push(`  • ${it}`));
+    else if (b.text) lines.push(b.text);
+  });
+  return lines.join("\n").trim();
+}
+
+function ProlanzCopywriter() {
+  const [copyTypes, setCopyTypes] = useState(["meta_ad"]);
+  const [tab, setTab] = useState("write");
+  const [directScript, setDirectScript] = useState("");
+  const [directNiche, setDirectNiche] = useState("");
+  const [directLoading, setDirectLoading] = useState(false);
+  const [directStatus, setDirectStatus] = useState("");
+  const [directError, setDirectError] = useState("");
+  const [directive, setDirective] = useState(null);
+  const [niche, setNiche] = useState("");
+  const [country, setCountry] = useState("NG");
+  const [brand, setBrand] = useState("");
+  const [offer, setOffer] = useState("");
+  const [price, setPrice] = useState("");
+  const [audience, setAudience] = useState("");
+  const [notes, setNotes] = useState("");
+  const [additionalDetails, setAdditionalDetails] = useState("");
+  const [refImage, setRefImage] = useState(null); // {mediaType, data, preview}
+
+  function onPickRefImage(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result || "");
+      const m = /^data:(.+?);base64,(.*)$/.exec(res);
+      if (m) setRefImage({ mediaType: m[1], data: m[2], preview: res });
+    };
+    reader.readAsDataURL(file);
+  }
+  const [tone, setTone] = useState("Naija / Pidgin");
+  const [count, setCount] = useState(3);
+  const [bizType, setBizType] = useState("product");
+
+  // analysis (one pull)
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [offerOptions, setOfferOptions] = useState([]);
+  const [pricePoints, setPricePoints] = useState("");
+  const [audienceAngle, setAudienceAngle] = useState("");
+  const [pickedBrands, setPickedBrands] = useState([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
+  const [analyzeError, setAnalyzeError] = useState("");
+
+  // generation
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
+  const [groundNote, setGroundNote] = useState("");
+  const [items, setItems] = useState([]);
+  const [optimizingIndex, setOptimizingIndex] = useState(null);
+  const [error, setError] = useState("");
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  const runId = useRef(0);
+  const workingModel = useRef(null);
+
+  async function smartCall(messages, mcpServers, maxTokens) {
+    if (workingModel.current)
+      return callClaude(messages, workingModel.current, mcpServers, maxTokens);
+    let lastErr;
+    for (const m of MODEL_CANDIDATES) {
+      try {
+        const r = await callClaude(messages, m, mcpServers, maxTokens);
+        workingModel.current = m;
+        return r;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("No model responded");
+  }
+
+  // ---- ONE pull: brands + offers + prices + audience ----
+  async function analyzeNiche() {
+    const nicheText = niche.trim();
+    if (!nicheText || analyzing) return;
+    const cc = country.trim().toUpperCase() || "NG";
+    setAnalyzing(true);
+    setAnalyzeError("");
+    setBrandOptions([]);
+    setOfferOptions([]);
+    setPricePoints("");
+    setAudienceAngle("");
+    setPickedBrands([]);
+    setAnalyzeStatus(`Analysing "${nicheText}" in ${cc}…`);
+    try {
+      const raw = await withRetry(() =>
+        smartCall(
+          [
+            {
+              role: "user",
+              content: `Use the Markifact connector to analyse the "${nicheText}" niche in ${cc}. Call meta_ads_library with input_mode 'manual', keywords for this niche, active_status 'active', group_similar_ads true, a SMALL limit of 8 (so results return INLINE and are NOT written to a file), and you MUST set country '${cc}'.
+
+From the ads CURRENTLY RUNNING there — prefer LOCAL ${cc} advertisers, DROP foreign/global chains, and treat brands running the MOST and LONGEST ads as the winners.
+
+For each brand also classify the CREATIVE TYPE (how the video is delivered) as ONE of: "Founder's Story" (founder on camera, why the business exists), "Talking Head" (a person speaking to camera delivering the pitch), "Testimonial" (a real customer sharing a result), "Product Demo" (showing the product/service actually working), "Street Interview" (vox pop in public), "Us vs Them" (contrast vs the old way/competitors), "UGC/Skit" (native phone-shot casual or dramatized skit), or "unclear". Infer it from the ad copy and format.
+
+Return ONLY compact JSON, no prose:
+{
+  "brands": [{"brand":"name","note":"e.g. '6 active ads · since Mar'","hook":"their strongest hook line","format":"video|image|carousel","creative":"one of the creative types above"}],
+  "offers": ["distinct winning OFFERS seen, e.g. 'Buy 1 Get 1 free', '20% off first order', 'Free delivery in Lagos'"],
+  "prices": "typical price points mentioned, e.g. '₦8,000–₦25,000' or 'not shown'",
+  "audience": "who these ads target, one line"
+}
+Cap brands at 8 and offers at 6. Output ONLY the JSON object — never describe a file, never say a file was created, never add any text before or after the braces. If a tool result mentions a saved file, still return JSON from whatever ad data you have. If nothing is running, return {"brands":[],"offers":[],"prices":"","audience":""}.`,
+            },
+          ],
+          [MARKIFACT]
+        )
+      );
+      let a;
+      try {
+        a = parseObj(raw);
+      } catch (_) {
+        setAnalyzeError(
+          "The library returned an oversized or odd result. Try a narrower niche keyword (e.g. 'soup brand' instead of 'food'), then re-run."
+        );
+        return;
+      }
+      setBrandOptions(Array.isArray(a.brands) ? a.brands : []);
+      setOfferOptions(Array.isArray(a.offers) ? a.offers : []);
+      setPricePoints(a.prices || "");
+      setAudienceAngle(a.audience || "");
+      if (a.audience && !audience.trim()) setAudience(a.audience);
+      if ((!a.brands || !a.brands.length) && (!a.offers || !a.offers.length))
+        setAnalyzeError(
+          `Nothing found for "${nicheText}" in ${cc}. Try a broader term, or check Markifact credits / your Claude limit.`
+        );
+    } catch (e) {
+      setAnalyzeError(
+        "Couldn't reach the ad library: " + ((e && e.message) || String(e))
+      );
+    } finally {
+      setAnalyzing(false);
+      setAnalyzeStatus("");
+    }
+  }
+
+  function togglePicked(b) {
+    setPickedBrands((prev) =>
+      prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]
+    );
+  }
+
+  function toggleCopyType(id) {
+    setCopyTypes((prev) =>
+      prev.includes(id)
+        ? prev.length > 1
+          ? prev.filter((x) => x !== id)
+          : prev
+        : [...prev, id]
+    );
+  }
+
+  function buildReference() {
+    const chosen = pickedBrands.length
+      ? brandOptions.filter((b) => pickedBrands.includes(b.brand))
+      : brandOptions.slice(0, 3);
+    if (!chosen.length) return "";
+    const lines = chosen.map(
+      (b, i) =>
+        `${i + 1}. ${b.brand} — ${b.creative ? b.creative + " — " : ""}hook: "${
+          b.hook || "-"
+        }" (${b.format || "-"})`
+    );
+    let ref = lines.join("\n");
+    if (audienceAngle) ref += `\nAudience these winners target: ${audienceAngle}`;
+    return ref;
+  }
+
+  async function generateOne(type, refText, priorLabels, myRun) {
+    const winnersBlock = refText
+      ? `\nLIVE WINNERS CURRENTLY RUNNING IN THIS NICHE (model your copy on these PROVEN structures — adapt to our brand, do NOT copy their wording):\n${refText}\n`
+      : `\n(No winners analysed, so this draft is NOT grounded in current proof — treat as a weaker starting point.)\n`;
+    const avoid = priorLabels.length
+      ? `\nUse a DIFFERENT angle from these already written: ${priorLabels.join(" | ")}.`
+      : "";
+    const vslRules =
+      type === "vsl"
+        ? `\nVSL RULES:
+- STRUCTURE COMES FROM THE WINNER: mirror the structure, beat order, hook style and pacing of the winning brand(s) being modeled above — do NOT force a fixed template onto it. If NO winner is being modeled, use the proven default order: Hook → Offer Teaser → Anchor → Problem → Agitation → Solution → Proof → Offer → CTA.
+- GUARDRAILS (always apply, whatever the structure): lock ONE audience (the single highest-value buyer); the hook must stop the scroll; prices/discounts in NAIRA, never percentages; ONE offer only; exactly ONE CTA (never two); if the store info gives a guarantee, make it concrete (refund / replace) and use it as proof; any address is a trust signal woven in early, never beside the CTA; use pay-on-delivery / Nigerian trust signals where relevant; no filler or throat-clearing; hard cap ~50 seconds (~130-150 words) — cut, don't rush.
+- Give 3 distinct hook options.
+- In PRODUCTION NOTES, name the recommended CREATIVE TYPE to shoot (Founder's Story / Talking Head / Testimonial / Product Demo / Street Interview / Us vs Them / UGC-Skit), based on how the modeled winners deliver.\n`
+        : "";
+
+    const landingSpec =
+      type === "landing"
+        ? bizType === "service"
+          ? `\nLANDING SPEC — SERVICE-based (text-heavy, fuller copy). Blocks in THIS order:\n{HERO: headline + subhead + CTA}\n{ABOUT US: who we are + credibility}\n{OUR SERVICES: items — each service, one line}\n{WHY US: items — 3-5 reasons/benefits}\n{PROOF: results, or a testimonial TEMPLATE with a [Client] placeholder — never invent reviews}\n{OFFER: the offer / free consultation, price in naira if any}\n{LEAD FORM: items — "Full name","Phone (WhatsApp)","Email","Service needed","Preferred time / message","Button label e.g. 'Book a call'"}\n{FAQ: items — 3-4 "Q — A"}\n{FINAL CTA: one line}\n`
+          : `\nLANDING SPEC — PRODUCT-based (visual-heavy, keep section copy punchy). Blocks in THIS order:\n{HERO: headline + subhead + CTA}\n{PRODUCT: items — what it is + 3-5 benefit/feature lines}\n{OFFER: the offer + price in naira}\n{ORDER FORM: items — "Full name","Phone (WhatsApp)","Delivery address","Quantity","Pay on delivery where relevant","Button label e.g. 'Order now'"}\n{REVIEWS: items — 2-3 short testimonial TEMPLATES with [Customer name] placeholders — never invent reviews}\n{FAQ: items — 3-4 "Q — A"}\n{FINAL CTA: one line}\n`
+        : "";
+
+    const promptText = `${BRAND}
+
+${PLAYBOOK}
+${winnersBlock}${vslRules}${landingSpec}
+Business type: ${
+      bizType === "service"
+        ? "SERVICE-based — sell trust and expertise; the goal is an enquiry, booking or call, not an instant purchase."
+        : "PRODUCT-based — the goal is to drive the order/purchase directly."
+    } Shape the angle, proof and CTA accordingly.
+${
+      refImage
+        ? "A reference image is attached (e.g. product photo, competitor ad, testimonial screenshot). Look at it and use whatever is relevant — product look, on-screen claims, layout, proof — to ground the copy.\n"
+        : ""
+    }WRITE ONE piece of copy, modeled on the winning structures above.
+- Copy type: ${type} (${TYPE_LABEL[type]})
+- Niche: ${niche.trim() || brand.trim() || "(infer from product)"}
+- Brand / product & what's sold: ${brand.trim() || "(infer sensibly)"}
+- Offer: ${offer.trim() || "(none given)"}
+- Price: ${price.trim() || "(not specified)"}
+- Target audience: ${audience.trim() || audienceAngle || "(general)"}
+- Store / other info (address, guarantee, pay-on-delivery, hours, anything to use): ${notes.trim() || "(none)"}
+- Additional details${refImage ? " about the attached screenshot" : ""}: ${additionalDetails.trim() || "(none)"}
+- Tone: ${tone}${avoid}
+
+Return STRICT JSON ONLY — no markdown, no text outside the braces:
+{
+  "label": "3-5 word angle name",
+  "type": "${type}",
+  "blocks": [ { "label": "UPPERCASE LABEL", "text": "..." } OR { "label": "UPPERCASE LABEL", "items": ["..."] } ]
+}
+Use the block shape from the playbook for this copy type. Use exactly ONE CTA in the whole piece — never two.`;
+
+    const messageContent = refImage
+      ? [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: refImage.mediaType,
+              data: refImage.data,
+            },
+          },
+          { type: "text", text: promptText },
+        ]
+      : promptText;
+
+    return withRetry(async () => {
+      const raw = await smartCall(
+        [{ role: "user", content: messageContent }],
+        undefined,
+        2000
+      );
+      if (myRun !== runId.current) return null;
+      return parseObjSafe(raw);
+    });
+  }
+
+  async function handleGenerate() {
+    const myRun = ++runId.current;
+    setLoading(true);
+    setError("");
+    setItems([]);
+    setGroundNote("");
+    setCopiedAll(false);
+    try {
+      const refText = buildReference();
+      if (!refText)
+        setGroundNote(
+          "No winners analysed yet — run “Analyse this niche” first for grounded copy. This draft is best-effort."
+        );
+      let total = 0;
+      let lastReason = "";
+      for (const type of copyTypes) {
+        const labels = [];
+        for (let i = 0; i < count; i++) {
+          if (myRun !== runId.current) return;
+          setStatus(
+            `Writing ${TYPE_LABEL[type] || type} ${i + 1} of ${count}…`
+          );
+          try {
+            const item = await generateOne(type, refText, labels, myRun);
+            if (!item) return;
+            labels.push(item.label || `#${i + 1}`);
+            setItems((prev) => [...prev, item]);
+            total++;
+          } catch (e) {
+            lastReason = (e && e.message) || String(e);
+          }
+        }
+      }
+      if (myRun !== runId.current) return;
+      if (total === 0)
+        setError(
+          "Couldn't write anything that time. " +
+            (lastReason ? "Reason: " + lastReason + ". " : "") +
+            "Hit generate again."
+        );
+    } catch (e) {
+      setError("Something broke: " + ((e && e.message) || String(e)));
+    } finally {
+      if (myRun === runId.current) {
+        setLoading(false);
+        setStatus("");
+      }
+    }
+  }
+
+  async function optimizeItem(index) {
+    if (optimizingIndex !== null) return;
+    const item = items[index];
+    if (!item) return;
+    setOptimizingIndex(index);
+    setError("");
+    try {
+      const current = copyToText(item);
+      const opt = await withRetry(async () => {
+        const raw = await smartCall([
+          {
+            role: "user",
+            content: `${BRAND}
+
+${OPTIMIZE_GUIDE}
+
+CONTEXT:
+- Copy type: ${item.type}
+- Offer: ${offer.trim() || "(none given)"} | Price: ${price.trim() || "(n/a)"}
+- Audience / TAM: ${audience.trim() || audienceAngle || "(lock the single highest-value buyer)"}
+- Store / other info: ${notes.trim() || "(none)"}
+
+COPY TO OPTIMIZE:
+${current}
+
+Optimize this copy so it fully complies with the rules above. Keep the WHOLE JSON compact so it fits: OFFER ASSESSMENT ≤ 2 sentences, the script tight (≤150 words total), FLAGS one line. Return STRICT JSON ONLY — no markdown, no text outside the braces:
+{
+  "label": "Optimized (v5.6)",
+  "type": "${item.type}",
+  "blocks": [
+    { "label": "OFFER ASSESSMENT", "text": "strong | moderate | weak — why, in plain language; flag weak elements + concrete fixes" },
+    ...the optimized copy blocks in the correct structure for this copy type...,
+    { "label": "FLAGS", "text": "anything needing confirmation (guarantee, dates, unverified claims, missing info) or 'none'" }
+  ]
+}`,
+          },
+        ], undefined, 2000);
+        return parseObjSafe(raw);
+      });
+      setItems((prev) => prev.map((it, i) => (i === index ? opt : it)));
+    } catch (e) {
+      setError("Optimize failed: " + ((e && e.message) || String(e)));
+    } finally {
+      setOptimizingIndex(null);
+    }
+  }
+
+  function copyOne(item) {
+    copyText(copyToText(item));
+  }
+
+  async function generateDirective() {
+    if (!directScript.trim() || directLoading) return;
+    setDirectLoading(true);
+    setDirectError("");
+    setDirective(null);
+    setDirectStatus("Directing it like the winners…");
+    try {
+      const winCreatives = brandOptions
+        .filter((b) => b.creative)
+        .map((b) => `${b.brand}: ${b.creative}`)
+        .join("; ");
+      const nicheTxt = directNiche.trim() || niche.trim() || "(general)";
+      const item = await withRetry(async () => {
+        const raw = await smartCall(
+          [
+            {
+              role: "user",
+              content: `${BRAND}
+
+You are also the CREATIVE DIRECTOR. Turn the script below into a shoot-ready CREATIVE DIRECTIVE — exactly how to produce it — modeled on how WINNING BRANDS in this niche execute their creative.
+Niche: ${nicheTxt}
+${
+  winCreatives
+    ? `Winning brands here mostly deliver as: ${winCreatives}. Lean toward the dominant winning creative type.`
+    : "(No pulled winners on hand — base it on strong direct-response video craft for this niche.)"
+}
+
+SCRIPT:
+${directScript.trim()}
+
+Return STRICT JSON ONLY — no markdown, no text outside the braces:
+{
+  "label": "Creative directive",
+  "type": "directive",
+  "blocks": [
+    {"label":"CREATIVE TYPE","text":"which of Founder's Story / Talking Head / Testimonial / Product Demo / Street Interview / Us vs Them / UGC-Skit to shoot, and why (tie it to the winners)"},
+    {"label":"SHOT LIST","items":["beat-by-beat: for each part of the script — what's on screen, camera move, talent action, setting"]},
+    {"label":"VISUAL STYLE","text":"look & feel, on-screen text style, energy"},
+    {"label":"PACING & RETENTION","text":"cut cadence, first-2s visual hook, open loops, b-roll notes"},
+    {"label":"TALENT & SETTING","text":"who's on camera, wardrobe/props, location"},
+    {"label":"SOUND","text":"VO / trending sound / music direction"},
+    {"label":"DELIVERY","text":"aspect ratio, captions, platform"}
+  ]
+}`,
+            },
+          ],
+          undefined,
+          2000
+        );
+        return parseObjSafe(raw);
+      });
+      setDirective(item);
+    } catch (e) {
+      setDirectError(
+        "Couldn't generate directions: " + ((e && e.message) || String(e))
+      );
+    } finally {
+      setDirectLoading(false);
+      setDirectStatus("");
+    }
+  }
+
+  function copyAll() {
+    const all = items
+      .map((it, i) => `#${i + 1} — ${it.label || ""}\n${copyToText(it)}`)
+      .join("\n\n" + "-".repeat(40) + "\n\n");
+    copyText(all);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 1600);
+  }
+
+  const analysed = brandOptions.length > 0 || offerOptions.length > 0;
+
+  return (
+    <div className="pz-root">
+      <style>{CSS}</style>
+
+      <header className="pz-head">
+        <div className="pz-eyebrow">PROLANZ&nbsp;DIGITALS&nbsp;·&nbsp;COPYWRITER</div>
+        <h1 className="pz-title">Copywriter</h1>
+        <p className="pz-sub">
+          One niche scan pulls the winning brands, offers, prices and audience running <em>right now</em> — then writes copy modeled on it.
+        </p>
+      </header>
+
+      <div className="pz-modebar">
+        <button
+          className={"pz-modebtn" + (tab === "write" ? " on" : "")}
+          onClick={() => setTab("write")}
+        >
+          Write copy
+        </button>
+        <button
+          className={"pz-modebtn" + (tab === "direct" ? " on" : "")}
+          onClick={() => setTab("direct")}
+        >
+          Creative Direction
+        </button>
+      </div>
+
+      {tab === "write" && (
+      <>
+      <section className="pz-panel">
+        <div className="pz-field">
+          <label className="pz-label">
+            What copy do you need <span className="pz-opt">(pick one or more)</span>
+          </label>
+          <div className="pz-chips">
+            {COPY_TYPES.map((t) => (
+              <button
+                key={t.id}
+                className={"pz-chip" + (copyTypes.includes(t.id) ? " on" : "")}
+                onClick={() => toggleCopyType(t.id)}
+                disabled={loading}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="pz-field">
+          <label className="pz-label">
+            Business type{" "}
+            <span className="pz-opt">(shapes the copy + landing sections)</span>
+          </label>
+          <div className="pz-chips">
+            {[
+              { id: "product", label: "Product-based" },
+              { id: "service", label: "Service-based" },
+            ].map((o) => (
+              <button
+                key={o.id}
+                className={"pz-chip" + (bizType === o.id ? " on" : "")}
+                onClick={() => setBizType(o.id)}
+                disabled={loading}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="pz-two">
+          <div className="pz-field">
+            <label className="pz-label">Niche / industry</label>
+            <input
+              className="pz-input"
+              value={niche}
+              onChange={(e) => setNiche(e.target.value)}
+              placeholder="e.g. human-hair wigs, meal prep, gym"
+              disabled={loading}
+            />
+          </div>
+          <div className="pz-field pz-country">
+            <label className="pz-label">
+              Country <span className="pz-opt">(ad market)</span>
+            </label>
+            <input
+              className="pz-input"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              placeholder="NG"
+              disabled={loading}
+            />
+          </div>
+        </div>
+
+        <div className="pz-field">
+          <label className="pz-label">Analyse what's winning</label>
+          <button
+            className="pz-find"
+            onClick={analyzeNiche}
+            disabled={analyzing || loading || !niche.trim()}
+          >
+            {analyzing
+              ? analyzeStatus || "Analysing…"
+              : "🔎 Analyse this niche (brands · offers · prices)"}
+          </button>
+          {analyzeError && <div className="pz-hint">{analyzeError}</div>}
+        </div>
+
+        {analysed && (
+          <div className="pz-analysis">
+            {brandOptions.length > 0 && (
+              <>
+                <div className="pz-analysis-tag">WINNING BRANDS — tap to model</div>
+                <div className="pz-chips">
+                  {brandOptions.map((b, i) => (
+                    <button
+                      key={i}
+                      className={
+                        "pz-chip alt" +
+                        (pickedBrands.includes(b.brand) ? " on2" : "")
+                      }
+                      onClick={() => togglePicked(b.brand)}
+                      disabled={loading}
+                      title={b.note || ""}
+                    >
+                      {b.brand}
+                    </button>
+                  ))}
+                </div>
+                {brandOptions.some((b) => b.creative) && (
+                  <div className="pz-deliver">
+                    <div className="pz-analysis-tag" style={{ marginTop: 14 }}>
+                      HOW THEY DELIVER — the creative type to shoot
+                    </div>
+                    {brandOptions
+                      .filter((b) => b.creative)
+                      .map((b, i) => (
+                        <div className="pz-deliver-row" key={i}>
+                          <span>{b.brand}</span>
+                          <span className="pz-deliver-type">{b.creative}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {offerOptions.length > 0 && (
+              <>
+                <div className="pz-analysis-tag" style={{ marginTop: 16 }}>
+                  WINNING OFFERS — tap to use
+                </div>
+                <div className="pz-chips">
+                  {offerOptions.map((o, i) => (
+                    <button
+                      key={i}
+                      className={"pz-chip" + (offer === o ? " on" : "")}
+                      onClick={() => setOffer(o)}
+                      disabled={loading}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {(pricePoints || audienceAngle) && (
+              <div className="pz-readout">
+                {pricePoints && (
+                  <div>
+                    <span className="pz-readout-k">PRICE POINTS SEEN</span>
+                    {pricePoints}
+                  </div>
+                )}
+                {audienceAngle && (
+                  <div>
+                    <span className="pz-readout-k">AUDIENCE</span>
+                    {audienceAngle}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="pz-field">
+          <label className="pz-label">Brand / product & what you're selling</label>
+          <input
+            className="pz-input"
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+            placeholder="e.g. Lush Hair — premium human-hair wigs"
+            disabled={loading}
+          />
+        </div>
+
+        <div className="pz-two">
+          <div className="pz-field">
+            <label className="pz-label">
+              Offer <span className="pz-opt">(or tap one above)</span>
+            </label>
+            <input
+              className="pz-input"
+              value={offer}
+              onChange={(e) => setOffer(e.target.value)}
+              placeholder="e.g. Buy 1 Get 1, 20% off"
+              disabled={loading}
+            />
+          </div>
+          <div className="pz-field">
+            <label className="pz-label">Price</label>
+            <input
+              className="pz-input"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="e.g. ₦25,000"
+              disabled={loading}
+            />
+          </div>
+        </div>
+
+        <div className="pz-field">
+          <label className="pz-label">
+            Audience <span className="pz-opt">(optional)</span>
+          </label>
+          <input
+            className="pz-input"
+            value={audience}
+            onChange={(e) => setAudience(e.target.value)}
+            placeholder="e.g. young pros in Lagos"
+            disabled={loading}
+          />
+        </div>
+
+        <div className="pz-field">
+          <label className="pz-label">
+            Store notes / other info <span className="pz-opt">(address, guarantee, pay-on-delivery, hours…)</span>
+          </label>
+          <textarea
+            className="pz-input pz-textarea"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Anything the copy should use — e.g. 'Shop 4, Balogun Market. 7-day money-back guarantee. Pay on delivery in Lagos.'"
+            disabled={loading}
+            rows={3}
+          />
+        </div>
+
+        <div className="pz-field">
+          <label className="pz-label">
+            Add a screenshot{" "}
+            <span className="pz-opt">(product photo, competitor ad, testimonial — lets the AI actually see it)</span>
+          </label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={onPickRefImage}
+            disabled={loading}
+            className="pz-file"
+          />
+          {refImage && (
+            <div className="pz-imgrow">
+              <img src={refImage.preview} alt="reference" className="pz-thumb" />
+              <button className="pz-ref-x" onClick={() => setRefImage(null)}>
+                remove
+              </button>
+            </div>
+          )}
+          <textarea
+            className="pz-input pz-textarea"
+            style={{ marginTop: 10 }}
+            value={additionalDetails}
+            onChange={(e) => setAdditionalDetails(e.target.value)}
+            placeholder="Additional details about the screenshot or the copy — e.g. 'This is our best-seller, focus on the color options' or 'This is a competitor ad, beat this angle'"
+            disabled={loading}
+            rows={2}
+          />
+        </div>
+
+        <div className="pz-field">
+          <label className="pz-label">Tone</label>
+          <div className="pz-chips">
+            {TONES.map((t) => (
+              <button
+                key={t}
+                className={"pz-chip" + (tone === t ? " on" : "")}
+                onClick={() => setTone(t)}
+                disabled={loading}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="pz-row">
+          <div className="pz-field pz-count">
+            <label className="pz-label">How many</label>
+            <div className="pz-chips">
+              {[1, 3, 5].map((n) => (
+                <button
+                  key={n}
+                  className={"pz-chip sm" + (count === n ? " on" : "")}
+                  onClick={() => setCount(n)}
+                  disabled={loading}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <button className="pz-go" onClick={handleGenerate} disabled={loading}>
+          {loading ? status || "Working…" : "Write copy"}
+          {!loading && <span className="pz-bolt">{"\u270D"}</span>}
+        </button>
+      </section>
+
+      {groundNote && <div className="pz-warn">{groundNote}</div>}
+      {error && <div className="pz-error">{error}</div>}
+
+      {items.length > 0 && (
+        <div className="pz-results-top">
+          <span className="pz-count-label">
+            {items.length} version{items.length > 1 ? "s" : ""} ready
+          </span>
+          <button className="pz-copyall" onClick={copyAll}>
+            {copiedAll ? "Copied all" : "Copy all"}
+          </button>
+        </div>
+      )}
+
+      <div className="pz-cards">
+        {items.map((item, i) => (
+          <CopyCard
+            key={i}
+            item={item}
+            index={i}
+            onCopy={() => copyOne(item)}
+            onOptimize={optimizeItem}
+            optimizing={optimizingIndex === i}
+          />
+        ))}
+        {loading && (
+          <div className="pz-loading">
+            <div className="pz-slate" />
+            <span>{status}</span>
+          </div>
+        )}
+        {items.length === 0 && !loading && !error && (
+          <div className="pz-empty">
+            Analyse a niche to see who's winning and what offers work — then write copy modeled on it.
+          </div>
+        )}
+      </div>
+      </>
+      )}
+
+      {tab === "direct" && (
+      <>
+        <section className="pz-panel">
+          <div className="pz-field">
+            <label className="pz-label">Paste the script / copy to direct</label>
+            <textarea
+              className="pz-input pz-textarea"
+              style={{ minHeight: 150 }}
+              value={directScript}
+              onChange={(e) => setDirectScript(e.target.value)}
+              placeholder="Paste a generated (or any) script here…"
+              disabled={directLoading}
+              rows={7}
+            />
+          </div>
+          <div className="pz-field">
+            <label className="pz-label">
+              Niche / industry{" "}
+              <span className="pz-opt">(so it matches how winners in your space shoot)</span>
+            </label>
+            <input
+              className="pz-input"
+              value={directNiche}
+              onChange={(e) => setDirectNiche(e.target.value)}
+              placeholder={niche.trim() ? niche : "e.g. skincare, food brand"}
+              disabled={directLoading}
+            />
+          </div>
+          <button
+            className="pz-go"
+            onClick={generateDirective}
+            disabled={directLoading || !directScript.trim()}
+          >
+            {directLoading ? directStatus || "Working…" : "Give creative directions"}
+            {!directLoading && <span className="pz-bolt">{"\u{1F3AC}"}</span>}
+          </button>
+          <p className="pz-note">
+            Grounds the direction in how winning brands in your niche actually shoot. Run “Analyse this niche” in the Write tab first for the tightest match.
+          </p>
+        </section>
+
+        {directError && <div className="pz-error">{directError}</div>}
+
+        <div className="pz-cards">
+          {directive && (
+            <CopyCard
+              item={directive}
+              index={0}
+              onCopy={() => copyOne(directive)}
+              showOptimize={false}
+            />
+          )}
+          {directLoading && (
+            <div className="pz-loading">
+              <div className="pz-slate" />
+              <span>{directStatus}</span>
+            </div>
+          )}
+          {!directive && !directLoading && !directError && (
+            <div className="pz-empty">
+              Paste a script and get a shoot-ready creative directive — creative type, shot list, visual style, pacing — modeled on winning brands.
+            </div>
+          )}
+        </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+function CopyCard({ item, index, onCopy, onOptimize, optimizing, showOptimize = true }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    onCopy();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <article className="pz-card" style={{ animationDelay: `${index * 60}ms` }}>
+      <div className="pz-slate-stripe" />
+      <div className="pz-card-head">
+        <span className="pz-num">{String(index + 1).padStart(2, "0")}</span>
+        <span className="pz-pill">{TYPE_LABEL[item.type] || item.type}</span>
+        {item.label && <span className="pz-pill plat">{item.label}</span>}
+        <div className="pz-cardbtns">
+          {showOptimize && (
+            <button
+              className="pz-opt-btn"
+              onClick={() => onOptimize(index)}
+              disabled={optimizing}
+            >
+              {optimizing ? "Optimizing…" : "Optimize (v5.6)"}
+            </button>
+          )}
+          <button className="pz-copy" onClick={copy}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+      {(item.blocks || []).map((b, bi) => (
+        <div className="pz-block" key={bi}>
+          <div className="pz-block-tag">{b.label}</div>
+          {Array.isArray(b.items) ? (
+            <ol className="pz-list">
+              {b.items.map((it, i) => (
+                <li key={i}>
+                  <span className="pz-list-n">{String(i + 1).padStart(2, "0")}</span>
+                  <span>{it}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="pz-text">{b.text}</p>
+          )}
+        </div>
+      ))}
+    </article>
+  );
+}
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
+.pz-root{
+  --bg:#1b0f2e; --bg2:#150a24; --surface:#271640; --surface2:#33205a;
+  --line:rgba(245,238,226,0.10); --text:#F4EEE2; --muted:#AC96CE;
+  --lime:#CDFF57; --coral:#FF5C7A; --ink:#160b26;
+  font-family:'Instrument Sans',system-ui,sans-serif; color:var(--text);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(255,92,122,0.14), transparent 55%),
+    radial-gradient(120% 80% at 0% 100%, rgba(205,255,87,0.10), transparent 55%),
+    var(--bg);
+  min-height:100vh; padding:28px 18px 64px; box-sizing:border-box;
+}
+.pz-root *{box-sizing:border-box}
+.pz-head{max-width:820px;margin:0 auto 20px}
+.pz-eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--lime);margin-bottom:10px}
+.pz-title{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:clamp(40px,8.5vw,72px);line-height:.92;margin:0;letter-spacing:-.02em}
+.pz-sub{color:var(--muted);font-size:16px;margin:12px 0 0;max-width:54ch}
+.pz-sub em{color:var(--text);font-style:italic}
+.pz-panel{max-width:820px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:20px}
+.pz-modebar{max-width:820px;margin:0 auto 14px;display:flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:5px}
+.pz-modebtn{flex:1;font-family:'Instrument Sans';font-size:15px;font-weight:600;color:var(--muted);background:transparent;border:none;border-radius:10px;padding:12px;cursor:pointer;transition:.15s}
+.pz-modebtn.on{background:var(--lime);color:var(--ink)}
+.pz-field{margin-bottom:16px}
+.pz-label{display:block;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-bottom:9px}
+.pz-opt{color:rgba(172,150,206,.6);text-transform:none;letter-spacing:0}
+.pz-chips{display:flex;flex-wrap:wrap;gap:8px}
+.pz-chip{font-family:'Instrument Sans';font-size:14px;font-weight:500;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:999px;padding:9px 15px;cursor:pointer;transition:.15s;text-align:left}
+.pz-chip.sm{padding:9px 18px;font-family:'Space Mono';font-weight:700}
+.pz-chip:hover:not(:disabled){border-color:rgba(205,255,87,.5)}
+.pz-chip.on{background:var(--lime);color:var(--ink);border-color:var(--lime);font-weight:600}
+.pz-chip.alt.on2{background:var(--coral);color:#2a0a14;border-color:var(--coral);font-weight:600}
+.pz-chip.alt:hover:not(:disabled){border-color:rgba(255,92,122,.6)}
+.pz-chip:disabled{opacity:.5;cursor:default}
+.pz-input{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:13px 15px;color:var(--text);font-family:'Instrument Sans';font-size:15px;outline:none;transition:.15s}
+.pz-input::placeholder{color:rgba(172,150,206,.55)}
+.pz-input:focus{border-color:var(--coral)}
+.pz-textarea{min-height:78px;resize:vertical;line-height:1.5}
+.pz-file{width:100%;font-family:'Instrument Sans';font-size:13px;color:var(--muted);background:var(--bg2);border:1px dashed var(--line);border-radius:12px;padding:11px;cursor:pointer}
+.pz-imgrow{display:flex;align-items:center;gap:12px;margin-top:10px}
+.pz-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+.pz-ref-x{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:none;border:1px solid var(--line);border-radius:8px;padding:6px 11px;cursor:pointer;flex-shrink:0}
+.pz-ref-x:hover{color:var(--coral);border-color:rgba(255,92,122,.4)}
+.pz-find{width:100%;background:var(--bg2);border:1px dashed rgba(205,255,87,.4);border-radius:12px;padding:13px;color:var(--lime);font-family:'Instrument Sans';font-weight:600;font-size:14.5px;cursor:pointer;transition:.15s}
+.pz-find:hover:not(:disabled){background:rgba(205,255,87,.08);border-style:solid}
+.pz-find:disabled{opacity:.5;cursor:default;color:var(--muted);border-color:var(--line)}
+.pz-hint{font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:8px}
+.pz-analysis{background:rgba(205,255,87,.05);border:1px solid rgba(205,255,87,.22);border-radius:14px;padding:16px;margin-bottom:16px}
+.pz-analysis-tag{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;color:var(--lime);margin-bottom:10px}
+.pz-readout{margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--text);line-height:1.4}
+.pz-readout-k{display:inline-block;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin-right:8px}
+.pz-deliver{display:flex;flex-direction:column;gap:6px}
+.pz-deliver-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--text);padding:6px 0;border-bottom:1px solid var(--line)}
+.pz-deliver-row:last-child{border-bottom:none}
+.pz-deliver-type{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--coral);flex-shrink:0}
+.pz-two{display:flex;gap:12px}
+.pz-two .pz-field{flex:1;min-width:0}
+.pz-country{max-width:120px}
+@media (max-width:480px){.pz-two{flex-direction:column;gap:0}.pz-country{max-width:none}}
+.pz-row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.pz-count{margin-bottom:0}
+.pz-go{width:100%;margin-top:4px;background:var(--coral);color:#2a0a14;border:none;border-radius:14px;padding:16px;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:18px;letter-spacing:-.01em;cursor:pointer;transition:.18s;display:flex;align-items:center;justify-content:center;gap:8px}
+.pz-go:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 30px rgba(255,92,122,.35)}
+.pz-go:disabled{background:var(--surface2);color:var(--muted);cursor:default}
+.pz-bolt{font-size:16px}
+.pz-warn{max-width:820px;margin:14px auto 0;background:rgba(255,180,80,.1);border:1px solid rgba(255,180,80,.35);border-radius:12px;padding:12px 15px;color:#ffd9a8;font-size:13.5px}
+.pz-error{max-width:820px;margin:18px auto 0;background:rgba(255,92,122,.12);border:1px solid rgba(255,92,122,.4);border-radius:12px;padding:14px 16px;color:#ffd0da;font-size:14px}
+.pz-results-top{max-width:820px;margin:26px auto 12px;display:flex;align-items:center;justify-content:space-between}
+.pz-count-label{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.1em;color:var(--muted)}
+.pz-copyall{font-family:'Space Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--lime);background:none;border:1px solid rgba(205,255,87,.35);border-radius:999px;padding:7px 15px;cursor:pointer;transition:.15s}
+.pz-copyall:hover{background:rgba(205,255,87,.1)}
+.pz-cards{max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.pz-card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px;overflow:hidden;animation:pzRise .45s cubic-bezier(.2,.7,.2,1) both}
+@keyframes pzRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.pz-slate-stripe{position:absolute;top:0;left:0;right:0;height:7px;background:repeating-linear-gradient(-52deg,var(--ink) 0 11px,var(--text) 11px 22px);opacity:.85}
+.pz-card-head{display:flex;align-items:center;gap:10px;margin:6px 0 6px;flex-wrap:wrap}
+.pz-num{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:22px;color:var(--lime)}
+.pz-pill{font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--coral);background:rgba(255,92,122,.12);border:1px solid rgba(255,92,122,.3);padding:4px 10px;border-radius:999px}
+.pz-pill.plat{color:var(--lime);background:rgba(205,255,87,.1);border-color:rgba(205,255,87,.3)}
+.pz-copy{margin-left:auto;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--muted);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;transition:.15s}
+.pz-copy:hover{color:var(--lime);border-color:rgba(205,255,87,.4)}
+.pz-cardbtns{margin-left:auto;display:flex;gap:8px;align-items:center}
+.pz-cardbtns .pz-copy{margin-left:0}
+.pz-opt-btn{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--ink);background:var(--lime);border:1px solid var(--lime);border-radius:8px;padding:7px 12px;cursor:pointer;transition:.15s}
+.pz-opt-btn:hover:not(:disabled){box-shadow:0 6px 18px rgba(205,255,87,.28)}
+.pz-opt-btn:disabled{opacity:.55;cursor:default;background:var(--surface2);color:var(--muted);border-color:var(--line)}
+.pz-block{margin-top:16px}
+.pz-block-tag{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.16em;color:var(--muted);margin-bottom:9px}
+.pz-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.pz-list li{display:flex;gap:12px;font-size:14.5px;line-height:1.5;color:var(--text)}
+.pz-list-n{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--lime);padding-top:3px;flex-shrink:0}
+.pz-text{font-size:14.5px;line-height:1.6;margin:0;color:var(--text);white-space:pre-wrap}
+.pz-loading{display:flex;align-items:center;gap:14px;color:var(--muted);font-size:14px;padding:22px;background:var(--surface);border:1px dashed var(--line);border-radius:16px}
+.pz-slate{width:26px;height:26px;border-radius:6px;background:repeating-linear-gradient(-52deg,var(--ink) 0 5px,var(--text) 5px 10px);animation:pzSpin 1s linear infinite}
+@keyframes pzSpin{to{transform:rotate(360deg)}}
+.pz-empty{max-width:820px;margin:0 auto;text-align:center;color:var(--muted);font-size:15px;padding:34px 20px;border:1px dashed var(--line);border-radius:16px}
+@media (max-width:560px){ .pz-row{align-items:stretch} }
+@media (prefers-reduced-motion:reduce){ .pz-card,.pz-slate{animation:none} .pz-go:hover:not(:disabled){transform:none} }
+`;
+
+
+const __root = ReactDOM.createRoot(document.getElementById("root"));
+__root.render(<ProlanzCopywriter />);
+</script>
+</body>
+</html>

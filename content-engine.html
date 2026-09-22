@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Content Engine</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+<style>html,body{margin:0;padding:0}#gate{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1b0f2e;color:#F4EEE2;font-family:system-ui,sans-serif;font-size:15px}</style>
+</head>
+<body>
+<div id="gate">Checking your session…</div>
+<div id="root"></div>
+
+<script>
+// ── TODO: fill these in from your Supabase project settings ──
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+window.__SB_SESSION__ = null;
+
+sb.auth.getSession().then(({ data }) => {
+  if (!data.session) {
+    window.location.href = "login.html";
+    return;
+  }
+  window.__SB_SESSION__ = data.session;
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("root").style.display = "block";
+});
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useRef } = React;
+
+
+// ---------------------------------------------------------------------------
+// Prolanz Content Engine
+// CREATE mode: pick a content type + platform -> get a shaped brief.
+// SPY mode: type any brand -> pull the ads they're running (via Markifact
+//   ad-library) -> "Model this -> script" feeds the promo generator so you
+//   write a script modeled on a proven winner, with your own product.
+// ---------------------------------------------------------------------------
+
+const TYPES = [
+  { id: "mix", label: "Surprise me" },
+  { id: "skit", label: "Video skit" },
+  { id: "reel", label: "Reel" },
+  { id: "pov", label: "POV" },
+  { id: "carousel", label: "Carousel" },
+  { id: "post", label: "Text post" },
+  { id: "casestudy", label: "Case study" },
+  { id: "promo", label: "Promo / offer" },
+  { id: "engagement", label: "Engagement" },
+  { id: "thread", label: "X thread" },
+  { id: "promoscript", label: "Promo video script" },
+  { id: "podcast", label: "Podcast promo" },
+];
+const TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.id, t.label]));
+
+const PLATFORMS = [
+  { id: "auto", label: "Best fit" },
+  { id: "Instagram", label: "Instagram" },
+  { id: "TikTok", label: "TikTok" },
+  { id: "LinkedIn", label: "LinkedIn" },
+  { id: "Facebook", label: "Facebook" },
+  { id: "X", label: "X" },
+  { id: "YouTube", label: "YouTube" },
+];
+
+// Ad-library spy platforms -> Markifact operation ids
+const SPY_PLATFORMS = [
+  { id: "meta", label: "Meta (FB/IG)", op: "meta_ads_library" },
+  { id: "tiktok", label: "TikTok", op: "tiktok_ads_library" },
+  { id: "linkedin", label: "LinkedIn", op: "linkedin_ads_library" },
+];
+
+const MARKIFACT = {
+  type: "url",
+  url: "https://api.markifact.com/mcp",
+  name: "markifact",
+};
+
+const MODEL_CANDIDATES = [
+  "claude-sonnet-4-6",
+  "claude-sonnet-5",
+  "claude-3-5-sonnet-20241022",
+];
+
+const BRAND = `You are the content lead for PROLANZ DIGITALS, a Nigerian creative & marketing agency. Prolanz helps ecommerce brands and businesses grow with content, landing pages, TikTok/short-form, and conversion work (e.g. it helped Roy Relish hit 789 orders in 4 months). Prolanz is also known for office-comedy skits featuring its own team.
+
+VOICE adapts to the job:
+- Skits & light social: relatable Nigerian humour, pidgin & slang welcome, never corny.
+- Educational / LinkedIn / thought-leadership: sharp, credible, specific, no fluff, real numbers.
+- Promo: confident and clear, one obvious call to action.
+
+SKIT CAST (reuse for skits): The Extrovert, The Introvert (looks angry), HR (vibe over protocol), The Boss (only one in corporate), Gen Z, The Client ("make it pop").
+
+PLATFORM TONE: LinkedIn = insight & authority. TikTok = fast & funny. Instagram carousel = value + save-bait. X = punchy hot take. Facebook = warm & community. Match the target platform.`;
+
+const PLAYBOOK = `OUTPUT SHAPE BY TYPE — choose sections that fit the chosen type:
+- skit: hook = on-screen hook. sections: [{label:"SHOOT BLUEPRINT", items:[3-4 scene lines + "End screen: ..."]},{label:"CAPTION", text}]. meta: SOUND, KEY MOMENT.
+- reel: a short vertical video (15-45s, can be educational, promo, b-roll, or talking-head — not necessarily comedy). hook = the first-2-seconds on-screen hook. sections: [{label:"BEATS", items:["0-2s — Hook: ... — Visual: ...","2-8s — ... — On-screen: ...", ... final beat = CTA]},{label:"CAPTION", text}]. meta: SOUND, LENGTH.
+- pov: a first-person, relatable POV short video. hook = a "POV: ..." on-screen line that names a specific, relatable situation. sections: [{label:"POV BLUEPRINT", items:["Scene beats acting out the POV, each with a Visual + On-screen text cue", ... final "End screen: ..."]},{label:"CAPTION", text: relatable line + engagement bait}]. meta: SOUND, LENGTH.
+- carousel: hook = slide-1 line. sections: [{label:"SLIDES", items:["Slide 1: ...", ... last "Slide N: CTA"]},{label:"CAPTION", text}]. meta: FORMAT: carousel, SLIDES: N.
+- post: hook = scroll-stopping first line. sections: [{label:"POST", text: the full written post in short lines},{label:"CTA", text}]. meta: (optional).
+- casestudy: hook = headline (client + result). sections: [{label:"STORY", items:["Problem: ...","What we did: ...","Result: ...","Proof: ..."]},{label:"CAPTION", text}]. meta: FORMAT.
+- promo: hook = offer hook. sections: [{label:"THE OFFER", text},{label:"CTA", text},{label:"CAPTION", text}]. meta: (optional).
+- engagement: hook = the question. sections: [{label:"POST", text},{label:"OPTIONS", items:[...]},{label:"CAPTION", text}]. meta: GOAL.
+- thread: hook = tweet 1. sections: [{label:"THREAD", items:["1/ ...","2/ ...", ... last = CTA]}]. meta: (optional).
+- podcast: hook = clip/quote hook. sections: [{label:"CLIP / QUOTE", text},{label:"CAPTION", text}]. meta: FORMAT.
+- promoscript: a promotional VIDEO AD SCRIPT, total runtime <= the given DURATION (never over 60s). hook = the first-3-seconds scroll-stopper. sections: [{label:"SCRIPT", items:["0-3s — VO: '...' — On-screen: '...' — Visual: ...", "3-12s — VO: ... — Visual: ...", ... final beat is the CTA]},{label:"CTA", text}]. meta: DURATION, FRAMEWORK (name the structure used), PLATFORM. Keep spoken words within the time budget (~2.5 words per second).`;
+
+async function callClaude(messages, tools, model, mcpServers) {
+  const body = { model, max_tokens: 1000, messages, tool: "content-engine" };
+  if (tools) body.tools = tools;
+  if (mcpServers) body.mcp_servers = mcpServers;
+  const token = (window.__SB_SESSION__ && window.__SB_SESSION__.access_token) || "";
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token,
+    },
+    body: JSON.stringify(body),
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (e) {
+    /* non-JSON */
+  }
+  if (!res.ok) {
+    const msg = (data && data.error) || "HTTP " + res.status;
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return (data.content || [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+}
+async function withRetry(fn, tries = 2) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+function parseIdea(raw) {
+  let t = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start !== -1 && end !== -1) t = t.slice(start, end + 1);
+  return JSON.parse(t);
+}
+
+function parseArray(raw) {
+  let t = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const start = t.indexOf("[");
+  const end = t.lastIndexOf("]");
+  if (start !== -1 && end !== -1) t = t.slice(start, end + 1);
+  const parsed = JSON.parse(t);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function ideaToText(idea) {
+  const lines = [];
+  lines.push(`${idea.title || ""}`.trim());
+  lines.push(
+    `[${TYPE_LABEL[idea.type] || idea.type || "post"}]${
+      idea.platform ? " · " + idea.platform : ""
+    }`
+  );
+  lines.push("");
+  if (idea.hook) lines.push(`HOOK: ${idea.hook}`);
+  (idea.sections || []).forEach((s) => {
+    lines.push("");
+    lines.push(`${s.label}`);
+    if (Array.isArray(s.items))
+      s.items.forEach((it, i) => lines.push(`  ${i + 1}. ${it}`));
+    else if (s.text) lines.push(s.text);
+  });
+  if (Array.isArray(idea.meta) && idea.meta.length) {
+    lines.push("");
+    lines.push(idea.meta.map((m) => `${m.k}: ${m.v}`).join("  ·  "));
+  }
+  return lines.join("\n");
+}
+
+function ProlanzContentEngine() {
+  const [appMode, setAppMode] = useState("create"); // 'create' | 'spy'
+
+  // create state
+  const [type, setType] = useState("mix");
+  const [platform, setPlatform] = useState("auto");
+  const [topic, setTopic] = useState("");
+  const [reference, setReference] = useState(""); // winning-ad structure to model
+  const [promo, setPromo] = useState({
+    product: "",
+    offer: "",
+    price: "",
+    audience: "",
+    notes: "",
+  });
+  const [duration, setDuration] = useState(60);
+  const [count, setCount] = useState(3);
+  const [useLive, setUseLive] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
+  const [trends, setTrends] = useState("");
+  const [ideas, setIdeas] = useState([]);
+  const [error, setError] = useState("");
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  // spy state
+  const [brand, setBrand] = useState("");
+  const [spyPlatform, setSpyPlatform] = useState("meta");
+  const [spyCountry, setSpyCountry] = useState("");
+  const [spyAds, setSpyAds] = useState([]);
+  const [spyLoading, setSpyLoading] = useState(false);
+  const [spyStatus, setSpyStatus] = useState("");
+  const [spyError, setSpyError] = useState("");
+
+  // viral state
+  const [viralUrl, setViralUrl] = useState("");
+  const [viralAbout, setViralAbout] = useState("");
+  const [viralNiche, setViralNiche] = useState("");
+  const [viralMechanic, setViralMechanic] = useState("");
+  const [viralImage, setViralImage] = useState(null); // {mediaType, data, preview}
+  const [webhookUrl, setWebhookUrl] = useState("");
+
+  const runId = useRef(0);
+  const workingModel = useRef(null);
+
+  async function smartCall(messages, tools, mcpServers) {
+    if (workingModel.current)
+      return callClaude(messages, tools, workingModel.current, mcpServers);
+    let lastErr;
+    for (const m of MODEL_CANDIDATES) {
+      try {
+        const r = await callClaude(messages, tools, m, mcpServers);
+        workingModel.current = m;
+        return r;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("No model responded");
+  }
+
+  // ---- SPY: pull a brand's live ads via Markifact ----
+  async function pullBrandAds() {
+    if (!brand.trim() || spyLoading) return;
+    const plat = SPY_PLATFORMS.find((p) => p.id === spyPlatform);
+    setSpyLoading(true);
+    setSpyError("");
+    setSpyAds([]);
+    setSpyStatus(`Searching the ${plat.label} ad library…`);
+    try {
+      const raw = await withRetry(() =>
+        smartCall(
+          [
+            {
+              role: "user",
+              content: `Use the Markifact connector to pull the ads the brand "${brand.trim()}" is CURRENTLY running on ${plat.label}. Call the ${plat.op} operation (search by this brand name, active ads only, group similar ads, a small limit${spyCountry.trim() ? `, country '${spyCountry.trim().toUpperCase()}'` : ""}). If the results are saved to a file, read the file to extract the ads.
+
+Then return ONLY a compact JSON array (max 5 items), no prose, no markdown:
+[{"brand":"advertiser/page name","format":"video | image | carousel | text","hook":"opening line or on-screen hook","primaryText":"main ad copy, <= 25 words","cta":"the call-to-action button","angle":"persuasion angle in 3-6 words","platforms":"where it runs","started":"start date if known"}]
+If there are no active ads, return [].`,
+            },
+          ],
+          undefined,
+          [MARKIFACT]
+        )
+      );
+      const ads = parseArray(raw);
+      setSpyAds(ads);
+      if (!ads.length)
+        setSpyError(
+          `No active ads found for "${brand.trim()}". Try the exact page name / handle, or switch platform.`
+        );
+    } catch (e) {
+      setSpyError(
+        "Couldn't reach the ad library: " + ((e && e.message) || String(e))
+      );
+    } finally {
+      setSpyLoading(false);
+      setSpyStatus("");
+    }
+  }
+
+  function modelThisAd(ad) {
+    setReference(
+      `Model the STRUCTURE of this proven ${
+        ad.brand || "competitor"
+      } ad (adapt to our offer, do NOT copy wording):
+- Hook style: ${ad.hook || "-"}
+- Angle: ${ad.angle || "-"}
+- Format: ${ad.format || "-"}
+- CTA: ${ad.cta || "-"}`
+    );
+    setType("promoscript");
+    setAppMode("create");
+    if (typeof window !== "undefined")
+      window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // ---- CREATE ----
+  async function pullTrends() {
+    return withRetry(() =>
+      smartCall(
+        [
+          {
+            role: "user",
+            content:
+              "Search the web for what is trending in NIGERIA this week (July 2026): trending TikTok/Reels sounds, viral formats, dance challenges, slang, cultural and business/news topics a creative agency could post about. Reply with 5-6 tight bullets, each a specific trend + one line on how a brand could use it. No preamble.",
+          },
+        ],
+        [{ type: "web_search_20250305", name: "web_search" }]
+      )
+    );
+  }
+
+  function onPickImage(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result || "");
+      const m = /^data:(.+?);base64,(.*)$/.exec(res);
+      if (m) setViralImage({ mediaType: m[1], data: m[2], preview: res });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function fetchViaWorkflow() {
+    const res = await fetch(webhookUrl.trim(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: viralUrl.trim() }),
+    });
+    if (!res.ok) throw new Error("workflow returned HTTP " + res.status);
+    const text = await res.text();
+    try {
+      const j = JSON.parse(text);
+      return (
+        j.transcript ||
+        j.content ||
+        j.text ||
+        j.caption ||
+        (typeof j === "string" ? j : JSON.stringify(j))
+      );
+    } catch {
+      return text;
+    }
+  }
+
+  async function decodeViral(extracted) {
+    if (viralImage) {
+      return withRetry(() =>
+        smartCall([
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: viralImage.mediaType,
+                  data: viralImage.data,
+                },
+              },
+              {
+                type: "text",
+                text: `This image is a screenshot / frame from a viral post${
+                  viralUrl.trim() ? ` (${viralUrl.trim()})` : ""
+                }. Read the on-screen text and describe what's actually shown, then explain the core VIRAL MECHANIC (the specific reason it spread) in 3-4 sentences.${
+                  viralAbout.trim() ? ` User context: ${viralAbout.trim()}.` : ""
+                } No preamble.`,
+              },
+            ],
+          },
+        ])
+      );
+    }
+    if (extracted) {
+      return withRetry(() =>
+        smartCall([
+          {
+            role: "user",
+            content: `Here is the ACTUAL content of a viral post, pulled from the source:\n\n${extracted}\n\nIn 2-3 sentences, explain what the post is and the core VIRAL MECHANIC (the specific reason it spread). No preamble.`,
+          },
+        ])
+      );
+    }
+    return withRetry(() =>
+      smartCall(
+        [
+          {
+            role: "user",
+            content: `Look up this viral post and explain WHY it went viral. Link: ${viralUrl.trim()}${
+              viralAbout.trim()
+                ? `\nContext from the user: ${viralAbout.trim()}`
+                : ""
+            }. If you can't open the link, use it plus any context to infer. Reply in 2-3 sentences: what the post is, and the core VIRAL MECHANIC (the specific reason it spread — relatability, controversy, surprise/twist, trend-jack, strong hook, emotional payoff, etc.). No preamble.`,
+          },
+        ],
+        [{ type: "web_search_20250305", name: "web_search" }]
+      )
+    );
+  }
+
+  async function generateViralIdea(mechanic, priorTitles, myRun) {
+    const avoid = priorTitles.length
+      ? `\nDo NOT repeat these: ${priorTitles.join(" | ")}.`
+      : "";
+    const nicheLine = viralNiche.trim()
+      ? `\nAdapt it for this brand/niche: ${viralNiche.trim()}.`
+      : "";
+    return withRetry(async () => {
+      const raw = await smartCall([
+        {
+          role: "user",
+          content: `${BRAND}
+
+A VIRAL POST to learn from:
+- Link: ${viralUrl.trim() || "(none)"}
+- What it is / why it went viral: ${
+            mechanic || viralAbout.trim() || "(infer from the link)"
+          }${nicheLine}
+
+Create ONE original Prolanz post idea that BORROWS THE VIRAL MECHANIC of that post (not a copy) — something we could actually shoot. Pick the best format.${avoid}
+
+Return STRICT JSON ONLY — no markdown, no text outside the braces:
+{
+  "title": "3-5 word name",
+  "type": "skit | reel | pov | carousel | post | trend-jack",
+  "platform": "e.g. TikTok, IG Reels",
+  "hook": "the scroll-stopping opening line",
+  "sections": [ {"label":"CONCEPT","text":"what to make, briefly"}, {"label":"WHY IT COULD POP","text":"the viral mechanic it reuses"} ],
+  "meta": [ {"k":"VIRALITY","v":"NN/100"}, {"k":"BORROWS","v":"the mechanic in 2-3 words"} ]
+}
+Give an HONEST virality estimate 0-100 based on how strong the mechanic + hook are — it's an estimate, not a promise. meta MUST include VIRALITY.`,
+        },
+      ]);
+      if (myRun !== runId.current) return null;
+      return parseIdea(raw);
+    });
+  }
+
+  async function handleViral() {
+    if (!viralUrl.trim() && !viralAbout.trim() && !viralImage) return;
+    const myRun = ++runId.current;
+    setLoading(true);
+    setError("");
+    setIdeas([]);
+    setViralMechanic("");
+    setCopiedAll(false);
+    try {
+      let extracted = "";
+      if (webhookUrl.trim() && viralUrl.trim() && !viralImage) {
+        setStatus("Fetching the real content via your workflow…");
+        try {
+          extracted = await fetchViaWorkflow();
+          if (myRun !== runId.current) return;
+        } catch (e) {
+          setError(
+            "Workflow call failed (" +
+              ((e && e.message) || "error") +
+              "). Falling back to link/description — check the webhook URL and that it returns CORS headers."
+          );
+          extracted = "";
+        }
+      }
+      setStatus("Decoding why it went viral…");
+      let mechanic = "";
+      try {
+        mechanic = await decodeViral(extracted);
+        if (myRun !== runId.current) return;
+        setViralMechanic(mechanic);
+      } catch {
+        mechanic = "";
+      }
+      const titles = [];
+      let lastReason = "";
+      for (let i = 0; i < count; i++) {
+        if (myRun !== runId.current) return;
+        setStatus(`Writing idea ${i + 1} of ${count}…`);
+        try {
+          const idea = await generateViralIdea(mechanic, titles, myRun);
+          if (!idea) return;
+          titles.push(idea.title || idea.hook);
+          setIdeas((prev) => [...prev, idea]);
+        } catch (e) {
+          lastReason = (e && e.message) || String(e);
+        }
+      }
+      if (myRun !== runId.current) return;
+      if (titles.length === 0)
+        setError(
+          "Couldn't generate ideas. " +
+            (lastReason ? "Reason: " + lastReason + ". " : "") +
+            "Try again."
+        );
+    } catch (e) {
+      setError("Something broke: " + ((e && e.message) || String(e)));
+    } finally {
+      if (myRun === runId.current) {
+        setLoading(false);
+        setStatus("");
+      }
+    }
+  }
+
+  async function generateOne(priorTitles, trendText, myRun) {
+    const typeLine =
+      type === "mix"
+        ? "Pick the content TYPE that best fits the topic and platform."
+        : `Content TYPE must be "${type}" (${TYPE_LABEL[type]}).`;
+    const platLine =
+      platform === "auto"
+        ? "Choose the best-fit platform for this content."
+        : `Target platform: ${platform}.`;
+    const trendBlock = trendText
+      ? `\nCURRENT NIGERIAN TRENDS (use one if it fits naturally):\n${trendText}\n`
+      : "";
+    const topicBlock = topic.trim()
+      ? `\nBuild it around this topic/trend: "${topic.trim()}".\n`
+      : "";
+    const avoid = priorTitles.length
+      ? `\nDo NOT repeat these: ${priorTitles.join(" | ")}.`
+      : "";
+    const wordBudget = Math.round((duration / 60) * 150);
+    const promoBlock =
+      type === "promoscript"
+        ? `\nPROMO SCRIPT INPUTS:
+- Product / service: ${promo.product.trim() || "(unspecified)"}
+- Offer: ${promo.offer.trim() || "(none)"}
+- Price: ${promo.price.trim() || "(n/a)"}
+- Target audience: ${promo.audience.trim() || "(general)"}
+- Notes: ${promo.notes.trim() || "(none)"}
+HARD RULES: total runtime <= ${duration}s (never over 60s). Spoken words <= ~${wordBudget}. Hook must land in the first 3s. Exactly ONE clear CTA. Pick the promo framework that best fits and name it in meta FRAMEWORK. Every beat needs a timecode, VO line, and visual cue.\n`
+        : "";
+    const referenceBlock = reference.trim()
+      ? `\nMODEL THIS WINNING AD (adapt the structure to our inputs, do NOT copy its wording):\n${reference.trim()}\n`
+      : "";
+
+    return withRetry(async () => {
+      const raw = await smartCall([
+        {
+          role: "user",
+          content: `${BRAND}
+
+${PLAYBOOK}
+${trendBlock}${topicBlock}${promoBlock}${referenceBlock}
+Create ONE original piece of Prolanz content. ${typeLine} ${platLine}${avoid}
+
+Return STRICT JSON ONLY — no markdown, no text outside the braces. Keep values tight so it fits. Shape:
+{
+  "title": "3-6 word name",
+  "type": "skit | reel | pov | carousel | post | casestudy | promo | engagement | thread | promoscript | podcast",
+  "platform": "the platform name",
+  "hook": "the scroll-stopping opening line",
+  "sections": [ { "label": "UPPERCASE LABEL", "items": ["..."] }  OR  { "label": "UPPERCASE LABEL", "text": "..." } ],
+  "meta": [ { "k": "SOUND", "v": "..." } ]
+}
+Use the section shape from the playbook for the chosen type. meta can be an empty array.`,
+        },
+      ]);
+      if (myRun !== runId.current) return null;
+      const idea = parseIdea(raw);
+      if (!idea.type || idea.type === "mix")
+        idea.type = type === "mix" ? "post" : type;
+      return idea;
+    });
+  }
+
+  async function handleGenerate() {
+    const myRun = ++runId.current;
+    setLoading(true);
+    setError("");
+    setIdeas([]);
+    setTrends("");
+    setCopiedAll(false);
+
+    try {
+      let trendText = "";
+      if (useLive) {
+        setStatus("Pulling what's hot in Naija right now…");
+        try {
+          trendText = await pullTrends();
+          if (myRun !== runId.current) return;
+          setTrends(trendText);
+        } catch {
+          trendText = "";
+        }
+      }
+
+      const titles = [];
+      let lastReason = "";
+      for (let i = 0; i < count; i++) {
+        if (myRun !== runId.current) return;
+        setStatus(`Writing idea ${i + 1} of ${count}…`);
+        try {
+          const idea = await generateOne(titles, trendText, myRun);
+          if (!idea) return;
+          titles.push(idea.title || idea.hook);
+          setIdeas((prev) => [...prev, idea]);
+        } catch (e) {
+          lastReason = (e && e.message) || String(e);
+        }
+      }
+      if (myRun !== runId.current) return;
+      if (titles.length === 0)
+        setError(
+          "Couldn't write anything that time. " +
+            (lastReason ? "Reason: " + lastReason + ". " : "") +
+            "Hit generate again."
+        );
+    } catch (e) {
+      setError("Something broke: " + ((e && e.message) || String(e)));
+    } finally {
+      if (myRun === runId.current) {
+        setLoading(false);
+        setStatus("");
+      }
+    }
+  }
+
+  function copyOne(idea) {
+    navigator.clipboard?.writeText(ideaToText(idea));
+  }
+  function copyAll() {
+    const all = ideas
+      .map((idea, i) => `#${i + 1}\n${ideaToText(idea)}`)
+      .join("\n\n" + "-".repeat(40) + "\n\n");
+    navigator.clipboard?.writeText(all);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 1600);
+  }
+
+  return (
+    <div className="pz-root">
+      <style>{CSS}</style>
+
+      <header className="pz-head">
+        <div className="pz-eyebrow">PROLANZ&nbsp;DIGITALS&nbsp;·&nbsp;CONTENT&nbsp;OPS</div>
+        <h1 className="pz-title">Content&nbsp;Engine</h1>
+        <p className="pz-sub">
+          Make content, or spy on any brand's live ads and turn a winner into your own script.
+        </p>
+      </header>
+
+      <div className="pz-modebar">
+        <button
+          className={"pz-modebtn" + (appMode === "create" ? " on" : "")}
+          onClick={() => setAppMode("create")}
+        >
+          Create content
+        </button>
+        <button
+          className={"pz-modebtn" + (appMode === "spy" ? " on" : "")}
+          onClick={() => setAppMode("spy")}
+        >
+          Spy a brand
+        </button>
+        <button
+          className={"pz-modebtn" + (appMode === "viral" ? " on" : "")}
+          onClick={() => setAppMode("viral")}
+        >
+          Viral decoder
+        </button>
+      </div>
+
+      {/* ---------------- VIRAL MODE ---------------- */}
+      {appMode === "viral" && (
+        <section className="pz-panel">
+          <div className="pz-field">
+            <label className="pz-label">Paste a viral post link</label>
+            <input
+              className="pz-input"
+              value={viralUrl}
+              onChange={(e) => setViralUrl(e.target.value)}
+              placeholder="TikTok / IG / X / YouTube URL"
+              disabled={loading}
+            />
+          </div>
+          <div className="pz-field">
+            <label className="pz-label">
+              Workflow webhook URL{" "}
+              <span className="pz-opt">(optional — auto-pulls the real content)</span>
+            </label>
+            <input
+              className="pz-input"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              placeholder="https://your-n8n-or-make-webhook…"
+              disabled={loading}
+            />
+          </div>
+          <div className="pz-field">
+            <label className="pz-label">
+              What's it about / why did it pop?{" "}
+              <span className="pz-opt">(optional but sharpens results)</span>
+            </label>
+            <textarea
+              className="pz-input pz-textarea"
+              value={viralAbout}
+              onChange={(e) => setViralAbout(e.target.value)}
+              placeholder="If the link can't be opened, describe the post — the AI often can't watch a video directly."
+              disabled={loading}
+              rows={2}
+            />
+          </div>
+          <div className="pz-field">
+            <label className="pz-label">
+              Screenshot of the post{" "}
+              <span className="pz-opt">(best — lets the AI actually SEE it)</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={onPickImage}
+              disabled={loading}
+              className="pz-file"
+            />
+            {viralImage && (
+              <div className="pz-imgrow">
+                <img src={viralImage.preview} alt="post" className="pz-thumb" />
+                <button className="pz-ref-x" onClick={() => setViralImage(null)}>
+                  remove
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="pz-two">
+            <div className="pz-field">
+              <label className="pz-label">
+                Adapt for <span className="pz-opt">(optional niche/brand)</span>
+              </label>
+              <input
+                className="pz-input"
+                value={viralNiche}
+                onChange={(e) => setViralNiche(e.target.value)}
+                placeholder="e.g. our office skits, a skincare client"
+                disabled={loading}
+              />
+            </div>
+            <div className="pz-field pz-count" style={{ marginBottom: 0 }}>
+              <label className="pz-label">How many</label>
+              <div className="pz-chips">
+                {[1, 3, 5].map((n) => (
+                  <button
+                    key={n}
+                    className={"pz-chip sm" + (count === n ? " on" : "")}
+                    onClick={() => setCount(n)}
+                    disabled={loading}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <button
+            className="pz-go"
+            onClick={handleViral}
+            disabled={
+              loading || (!viralUrl.trim() && !viralAbout.trim() && !viralImage)
+            }
+          >
+            {loading ? status || "Working…" : "Decode & generate ideas"}
+            {!loading && <span className="pz-bolt">{"\u{1F525}"}</span>}
+          </button>
+          <p className="pz-note">
+            The AI can't open a video link directly. To let it truly see the post, upload a screenshot — it reads the on-screen text and the visual. A link or description alone is a guess.
+          </p>
+        </section>
+      )}
+
+      {appMode === "viral" && viralMechanic && (
+        <section className="pz-trends">
+          <div className="pz-trends-tag">WHY IT WENT VIRAL</div>
+          <pre className="pz-trends-body">{viralMechanic}</pre>
+        </section>
+      )}
+
+      {appMode === "viral" && error && <div className="pz-error">{error}</div>}
+
+      {appMode === "viral" && ideas.length > 0 && (
+        <div className="pz-results-top">
+          <span className="pz-count-label">
+            {ideas.length} idea{ideas.length > 1 ? "s" : ""} ready
+          </span>
+          <button className="pz-copyall" onClick={copyAll}>
+            {copiedAll ? "Copied all" : "Copy all"}
+          </button>
+        </div>
+      )}
+
+      {appMode === "viral" && (
+        <div className="pz-cards">
+          {ideas.map((idea, i) => (
+            <IdeaCard key={i} idea={idea} index={i} onCopy={() => copyOne(idea)} />
+          ))}
+          {loading && (
+            <div className="pz-loading">
+              <div className="pz-slate" />
+              <span>{status}</span>
+            </div>
+          )}
+          {ideas.length === 0 && !loading && !error && (
+            <div className="pz-empty">
+              Paste a viral post and I'll reverse-engineer why it worked — then hand you ideas that borrow the mechanic, each with a virality rating.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---------------- SPY MODE ---------------- */}
+      {appMode === "spy" && (
+        <section className="pz-panel">
+          <div className="pz-field">
+            <label className="pz-label">Brand name or handle</label>
+            <input
+              className="pz-input"
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              placeholder="e.g. Gymshark, Oraimo, @somebrand"
+              disabled={spyLoading}
+              onKeyDown={(e) => e.key === "Enter" && pullBrandAds()}
+            />
+          </div>
+          <div className="pz-row">
+            <div className="pz-field" style={{ marginBottom: 0 }}>
+              <label className="pz-label">Ad library</label>
+              <div className="pz-chips">
+                {SPY_PLATFORMS.map((p) => (
+                  <button
+                    key={p.id}
+                    className={"pz-chip alt" + (spyPlatform === p.id ? " on2" : "")}
+                    onClick={() => setSpyPlatform(p.id)}
+                    disabled={spyLoading}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="pz-field pz-country" style={{ marginBottom: 0 }}>
+              <label className="pz-label">
+                Country <span className="pz-opt">(optional)</span>
+              </label>
+              <input
+                className="pz-input"
+                value={spyCountry}
+                onChange={(e) => setSpyCountry(e.target.value)}
+                placeholder="NG, US…"
+                disabled={spyLoading}
+              />
+            </div>
+          </div>
+          <button className="pz-go" onClick={pullBrandAds} disabled={spyLoading}>
+            {spyLoading ? spyStatus || "Searching…" : "Pull their live ads"}
+            {!spyLoading && <span className="pz-bolt">{"\u{1F575}"}</span>}
+          </button>
+          <p className="pz-note">
+            Tip: a name search finds everyone running ads that mention it. For a brand's
+            own ads only, use their exact page name or handle.
+          </p>
+        </section>
+      )}
+
+      {appMode === "spy" && spyError && <div className="pz-error">{spyError}</div>}
+
+      {appMode === "spy" && spyAds.length > 0 && (
+        <div className="pz-results-top">
+          <span className="pz-count-label">
+            {spyAds.length} live ad{spyAds.length > 1 ? "s" : ""} found
+          </span>
+        </div>
+      )}
+
+      {appMode === "spy" && (
+        <div className="pz-cards">
+          {spyAds.map((ad, i) => (
+            <SpyCard key={i} ad={ad} index={i} onModel={() => modelThisAd(ad)} />
+          ))}
+          {spyLoading && (
+            <div className="pz-loading">
+              <div className="pz-slate" />
+              <span>{spyStatus}</span>
+            </div>
+          )}
+          {!spyLoading && spyAds.length === 0 && !spyError && (
+            <div className="pz-empty">
+              Type a brand, pick the ad library, and pull the ads they're running right now.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---------------- CREATE MODE ---------------- */}
+      {appMode === "create" && (
+        <section className="pz-panel">
+          {reference && (
+            <div className="pz-ref">
+              <div>
+                <div className="pz-ref-tag">MODELING A WINNING AD</div>
+                <div className="pz-ref-body">{reference.split("\n")[1] || reference}</div>
+              </div>
+              <button className="pz-ref-x" onClick={() => setReference("")}>
+                clear
+              </button>
+            </div>
+          )}
+
+          <div className="pz-field">
+            <label className="pz-label">What are you making</label>
+            <div className="pz-chips">
+              {TYPES.map((t) => (
+                <button
+                  key={t.id}
+                  className={"pz-chip" + (type === t.id ? " on" : "")}
+                  onClick={() => setType(t.id)}
+                  disabled={loading}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pz-field">
+            <label className="pz-label">Platform</label>
+            <div className="pz-chips">
+              {PLATFORMS.map((p) => (
+                <button
+                  key={p.id}
+                  className={"pz-chip alt" + (platform === p.id ? " on2" : "")}
+                  onClick={() => setPlatform(p.id)}
+                  disabled={loading}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {type !== "promoscript" && (
+            <div className="pz-field">
+              <label className="pz-label">
+                A topic, trend or angle <span className="pz-opt">(optional)</span>
+              </label>
+              <input
+                className="pz-input"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. landing pages, Detty December, own your audience…"
+                disabled={loading}
+              />
+            </div>
+          )}
+
+          {type === "promoscript" && (
+            <div className="pz-promo">
+              <div className="pz-promo-tag">PROMO BRIEF — feed it the details</div>
+              <div className="pz-field">
+                <label className="pz-label">Product / service</label>
+                <input
+                  className="pz-input"
+                  value={promo.product}
+                  onChange={(e) => setPromo({ ...promo, product: e.target.value })}
+                  placeholder="What are you selling?"
+                  disabled={loading}
+                />
+              </div>
+              <div className="pz-two">
+                <div className="pz-field">
+                  <label className="pz-label">The offer</label>
+                  <input
+                    className="pz-input"
+                    value={promo.offer}
+                    onChange={(e) => setPromo({ ...promo, offer: e.target.value })}
+                    placeholder="e.g. Buy 1 Get 1"
+                    disabled={loading}
+                  />
+                </div>
+                <div className="pz-field">
+                  <label className="pz-label">Price</label>
+                  <input
+                    className="pz-input"
+                    value={promo.price}
+                    onChange={(e) => setPromo({ ...promo, price: e.target.value })}
+                    placeholder="e.g. ₦15,000"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+              <div className="pz-field">
+                <label className="pz-label">Target audience</label>
+                <input
+                  className="pz-input"
+                  value={promo.audience}
+                  onChange={(e) => setPromo({ ...promo, audience: e.target.value })}
+                  placeholder="Who's it for? e.g. busy mums in Lagos"
+                  disabled={loading}
+                />
+              </div>
+              <div className="pz-field">
+                <label className="pz-label">
+                  Anything else <span className="pz-opt">(optional)</span>
+                </label>
+                <input
+                  className="pz-input"
+                  value={promo.notes}
+                  onChange={(e) => setPromo({ ...promo, notes: e.target.value })}
+                  placeholder="tone, key benefit, a must-say line…"
+                  disabled={loading}
+                />
+              </div>
+              <div className="pz-field" style={{ marginBottom: 0 }}>
+                <label className="pz-label">Length (max 60s)</label>
+                <div className="pz-chips">
+                  {[15, 30, 60].map((d) => (
+                    <button
+                      key={d}
+                      className={"pz-chip sm" + (duration === d ? " on" : "")}
+                      onClick={() => setDuration(d)}
+                      disabled={loading}
+                    >
+                      {d}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="pz-row">
+            <div className="pz-field pz-count">
+              <label className="pz-label">How many</label>
+              <div className="pz-chips">
+                {[1, 3, 5].map((n) => (
+                  <button
+                    key={n}
+                    className={"pz-chip sm" + (count === n ? " on" : "")}
+                    onClick={() => setCount(n)}
+                    disabled={loading}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              className={"pz-toggle" + (useLive ? " on" : "")}
+              onClick={() => setUseLive((v) => !v)}
+              disabled={loading}
+              aria-pressed={useLive}
+            >
+              <span className="pz-dot" />
+              Pull live trends
+            </button>
+          </div>
+
+          <button className="pz-go" onClick={handleGenerate} disabled={loading}>
+            {loading ? status || "Working…" : "Generate ideas"}
+            {!loading && <span className="pz-bolt">{"\u26a1"}</span>}
+          </button>
+        </section>
+      )}
+
+      {appMode === "create" && trends && (
+        <section className="pz-trends">
+          <div className="pz-trends-tag">TRENDS PULLED THIS RUN</div>
+          <pre className="pz-trends-body">{trends}</pre>
+        </section>
+      )}
+
+      {appMode === "create" && error && <div className="pz-error">{error}</div>}
+
+      {appMode === "create" && ideas.length > 0 && (
+        <div className="pz-results-top">
+          <span className="pz-count-label">
+            {ideas.length} idea{ideas.length > 1 ? "s" : ""} ready
+          </span>
+          <button className="pz-copyall" onClick={copyAll}>
+            {copiedAll ? "Copied all" : "Copy all"}
+          </button>
+        </div>
+      )}
+
+      {appMode === "create" && (
+        <div className="pz-cards">
+          {ideas.map((idea, i) => (
+            <IdeaCard key={i} idea={idea} index={i} onCopy={() => copyOne(idea)} />
+          ))}
+          {loading && (
+            <div className="pz-loading">
+              <div className="pz-slate" />
+              <span>{status}</span>
+            </div>
+          )}
+          {ideas.length === 0 && !loading && !error && (
+            <div className="pz-empty">
+              Pick a type, pick a platform, hit generate. Or hop to “Spy a brand” to model a winner.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SpyCard({ ad, index, onModel }) {
+  return (
+    <article className="pz-card" style={{ animationDelay: `${index * 60}ms` }}>
+      <div className="pz-slate-stripe" />
+      <div className="pz-card-head">
+        <span className="pz-num">{String(index + 1).padStart(2, "0")}</span>
+        {ad.format && <span className="pz-pill">{ad.format}</span>}
+        {ad.brand && <span className="pz-pill plat">{ad.brand}</span>}
+      </div>
+
+      {ad.hook && <h2 className="pz-hook">{ad.hook}</h2>}
+      {ad.primaryText && (
+        <div className="pz-block">
+          <div className="pz-block-tag">AD COPY</div>
+          <p className="pz-text">{ad.primaryText}</p>
+        </div>
+      )}
+
+      <div className="pz-meta">
+        {ad.angle && (
+          <div className="pz-meta-item">
+            <span className="pz-meta-k">ANGLE</span>
+            <span>{ad.angle}</span>
+          </div>
+        )}
+        {ad.cta && (
+          <div className="pz-meta-item">
+            <span className="pz-meta-k">CTA</span>
+            <span>{ad.cta}</span>
+          </div>
+        )}
+        {ad.platforms && (
+          <div className="pz-meta-item">
+            <span className="pz-meta-k">RUNNING ON</span>
+            <span>{ad.platforms}</span>
+          </div>
+        )}
+        {ad.started && (
+          <div className="pz-meta-item">
+            <span className="pz-meta-k">SINCE</span>
+            <span>{ad.started}</span>
+          </div>
+        )}
+      </div>
+
+      <button className="pz-model" onClick={onModel}>
+        Model this → script
+      </button>
+    </article>
+  );
+}
+
+function IdeaCard({ idea, index, onCopy }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    onCopy();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <article className="pz-card" style={{ animationDelay: `${index * 60}ms` }}>
+      <div className="pz-slate-stripe" />
+      <div className="pz-card-head">
+        <span className="pz-num">{String(index + 1).padStart(2, "0")}</span>
+        <span className="pz-pill">{TYPE_LABEL[idea.type] || idea.type}</span>
+        {idea.platform && <span className="pz-pill plat">{idea.platform}</span>}
+        <button className="pz-copy" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+
+      {idea.hook && <h2 className="pz-hook">{idea.hook}</h2>}
+
+      {(idea.sections || []).map((s, si) => (
+        <div className="pz-block" key={si}>
+          <div className="pz-block-tag">{s.label}</div>
+          {Array.isArray(s.items) ? (
+            <ol className="pz-list">
+              {s.items.map((it, i) => (
+                <li key={i}>
+                  <span className="pz-list-n">{String(i + 1).padStart(2, "0")}</span>
+                  <span>{it}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="pz-text">{s.text}</p>
+          )}
+        </div>
+      ))}
+
+      {Array.isArray(idea.meta) && idea.meta.length > 0 && (
+        <div className="pz-meta">
+          {idea.meta.map((m, i) => (
+            <div className="pz-meta-item" key={i}>
+              <span className="pz-meta-k">{m.k}</span>
+              <span>{m.v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
+
+.pz-root{
+  --bg:#1b0f2e; --bg2:#150a24; --surface:#271640; --surface2:#33205a;
+  --line:rgba(245,238,226,0.10); --text:#F4EEE2; --muted:#AC96CE;
+  --lime:#CDFF57; --coral:#FF5C7A; --ink:#160b26;
+  font-family:'Instrument Sans',system-ui,sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(255,92,122,0.14), transparent 55%),
+    radial-gradient(120% 80% at 0% 100%, rgba(205,255,87,0.10), transparent 55%),
+    var(--bg);
+  min-height:100vh; padding:28px 18px 64px; box-sizing:border-box;
+}
+.pz-root *{box-sizing:border-box}
+
+.pz-head{max-width:820px;margin:0 auto 18px}
+.pz-eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--lime);margin-bottom:10px}
+.pz-title{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:clamp(40px,8.5vw,72px);line-height:.92;margin:0;letter-spacing:-.02em}
+.pz-sub{color:var(--muted);font-size:16px;margin:12px 0 0;max-width:48ch}
+
+.pz-modebar{max-width:820px;margin:0 auto 14px;display:flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:5px}
+.pz-modebtn{flex:1;font-family:'Instrument Sans';font-size:15px;font-weight:600;color:var(--muted);background:transparent;border:none;border-radius:10px;padding:12px;cursor:pointer;transition:.15s}
+.pz-modebtn.on{background:var(--lime);color:var(--ink)}
+
+.pz-panel{max-width:820px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:20px}
+.pz-field{margin-bottom:16px}
+.pz-label{display:block;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-bottom:9px}
+.pz-opt{color:rgba(172,150,206,.6);text-transform:none;letter-spacing:0}
+
+.pz-chips{display:flex;flex-wrap:wrap;gap:8px}
+.pz-chip{font-family:'Instrument Sans';font-size:14px;font-weight:500;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:999px;padding:9px 15px;cursor:pointer;transition:.15s}
+.pz-chip.sm{padding:9px 18px;font-family:'Space Mono';font-weight:700}
+.pz-chip:hover:not(:disabled){border-color:rgba(205,255,87,.5)}
+.pz-chip.on{background:var(--lime);color:var(--ink);border-color:var(--lime);font-weight:600}
+.pz-chip.alt.on2{background:var(--coral);color:#2a0a14;border-color:var(--coral);font-weight:600}
+.pz-chip.alt:hover:not(:disabled){border-color:rgba(255,92,122,.6)}
+.pz-chip:disabled{opacity:.5;cursor:default}
+
+.pz-input{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:13px 15px;color:var(--text);font-family:'Instrument Sans';font-size:15px;outline:none;transition:.15s}
+.pz-input::placeholder{color:rgba(172,150,206,.55)}
+.pz-input:focus{border-color:var(--coral)}
+.pz-textarea{min-height:70px;resize:vertical;line-height:1.5}
+.pz-file{width:100%;font-family:'Instrument Sans';font-size:13px;color:var(--muted);background:var(--bg2);border:1px dashed var(--line);border-radius:12px;padding:11px;cursor:pointer}
+.pz-imgrow{display:flex;align-items:center;gap:12px;margin-top:10px}
+.pz-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+
+.pz-promo{background:var(--bg2);border:1px solid rgba(255,92,122,.25);border-radius:14px;padding:16px;margin-bottom:16px}
+.pz-promo-tag{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;color:var(--coral);margin-bottom:14px}
+.pz-two{display:flex;gap:12px}
+.pz-two .pz-field{flex:1;min-width:0}
+@media (max-width:480px){.pz-two{flex-direction:column;gap:0}}
+
+.pz-ref{display:flex;align-items:center;gap:12px;justify-content:space-between;background:rgba(205,255,87,.08);border:1px solid rgba(205,255,87,.3);border-radius:12px;padding:12px 14px;margin-bottom:16px}
+.pz-ref-tag{font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.14em;color:var(--lime);margin-bottom:4px}
+.pz-ref-body{font-size:13px;color:var(--text);line-height:1.4}
+.pz-ref-x{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--muted);background:none;border:1px solid var(--line);border-radius:8px;padding:6px 11px;cursor:pointer;flex-shrink:0}
+.pz-ref-x:hover{color:var(--coral);border-color:rgba(255,92,122,.4)}
+
+.pz-row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.pz-count{margin-bottom:0}
+.pz-country{max-width:160px}
+
+.pz-toggle{display:inline-flex;align-items:center;gap:9px;font-family:'Instrument Sans';font-size:14px;font-weight:500;color:var(--muted);background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:10px 16px;cursor:pointer;transition:.15s;height:40px}
+.pz-toggle .pz-dot{width:9px;height:9px;border-radius:50%;background:var(--muted);transition:.15s}
+.pz-toggle.on{color:var(--text);border-color:rgba(205,255,87,.45)}
+.pz-toggle.on .pz-dot{background:var(--lime);box-shadow:0 0 10px var(--lime)}
+.pz-toggle:disabled{opacity:.5;cursor:default}
+
+.pz-go{width:100%;margin-top:4px;background:var(--coral);color:#2a0a14;border:none;border-radius:14px;padding:16px;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:18px;letter-spacing:-.01em;cursor:pointer;transition:.18s;display:flex;align-items:center;justify-content:center;gap:8px}
+.pz-go:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 30px rgba(255,92,122,.35)}
+.pz-go:disabled{background:var(--surface2);color:var(--muted);cursor:default}
+.pz-bolt{font-size:16px}
+.pz-note{font-size:12.5px;color:var(--muted);margin:12px 2px 0;line-height:1.45}
+
+.pz-trends{max-width:820px;margin:18px auto 0;background:rgba(205,255,87,.06);border:1px solid rgba(205,255,87,.22);border-radius:16px;padding:16px 18px}
+.pz-trends-tag{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.16em;color:var(--lime);margin-bottom:8px}
+.pz-trends-body{font-family:'Instrument Sans';font-size:14px;line-height:1.55;color:var(--text);white-space:pre-wrap;margin:0;font-weight:400}
+
+.pz-error{max-width:820px;margin:18px auto 0;background:rgba(255,92,122,.12);border:1px solid rgba(255,92,122,.4);border-radius:12px;padding:14px 16px;color:#ffd0da;font-size:14px}
+
+.pz-results-top{max-width:820px;margin:26px auto 12px;display:flex;align-items:center;justify-content:space-between}
+.pz-count-label{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.1em;color:var(--muted)}
+.pz-copyall{font-family:'Space Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--lime);background:none;border:1px solid rgba(205,255,87,.35);border-radius:999px;padding:7px 15px;cursor:pointer;transition:.15s}
+.pz-copyall:hover{background:rgba(205,255,87,.1)}
+
+.pz-cards{max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+
+.pz-card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px;overflow:hidden;animation:pzRise .45s cubic-bezier(.2,.7,.2,1) both}
+@keyframes pzRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.pz-slate-stripe{position:absolute;top:0;left:0;right:0;height:7px;background:repeating-linear-gradient(-52deg,var(--ink) 0 11px,var(--text) 11px 22px);opacity:.85}
+
+.pz-card-head{display:flex;align-items:center;gap:10px;margin:6px 0 14px;flex-wrap:wrap}
+.pz-num{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:22px;color:var(--lime)}
+.pz-pill{font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--coral);background:rgba(255,92,122,.12);border:1px solid rgba(255,92,122,.3);padding:4px 10px;border-radius:999px}
+.pz-pill.plat{color:var(--lime);background:rgba(205,255,87,.1);border-color:rgba(205,255,87,.3)}
+.pz-copy{margin-left:auto;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--muted);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;transition:.15s}
+.pz-copy:hover{color:var(--lime);border-color:rgba(205,255,87,.4)}
+
+.pz-hook{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:23px;line-height:1.14;margin:0 0 4px;letter-spacing:-.01em}
+
+.pz-block{margin-top:16px}
+.pz-block-tag{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.16em;color:var(--muted);margin-bottom:9px}
+.pz-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.pz-list li{display:flex;gap:12px;font-size:14.5px;line-height:1.5;color:var(--text)}
+.pz-list-n{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--lime);padding-top:3px;flex-shrink:0}
+.pz-text{font-size:14.5px;line-height:1.6;margin:0;color:var(--text);white-space:pre-wrap}
+
+.pz-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.pz-meta-item{flex:1 1 40%;min-width:0;display:flex;flex-direction:column;gap:3px}
+.pz-meta-k{font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.14em;color:var(--muted)}
+.pz-meta-item span:last-child{font-size:14px;line-height:1.4}
+
+.pz-model{width:100%;margin-top:18px;background:var(--lime);color:var(--ink);border:none;border-radius:12px;padding:13px;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:15px;cursor:pointer;transition:.15s}
+.pz-model:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(205,255,87,.28)}
+
+.pz-loading{display:flex;align-items:center;gap:14px;color:var(--muted);font-size:14px;padding:22px;background:var(--surface);border:1px dashed var(--line);border-radius:16px}
+.pz-slate{width:26px;height:26px;border-radius:6px;background:repeating-linear-gradient(-52deg,var(--ink) 0 5px,var(--text) 5px 10px);animation:pzSpin 1s linear infinite}
+@keyframes pzSpin{to{transform:rotate(360deg)}}
+
+.pz-empty{max-width:820px;margin:0 auto;text-align:center;color:var(--muted);font-size:15px;padding:34px 20px;border:1px dashed var(--line);border-radius:16px}
+
+@media (max-width:560px){
+  .pz-meta-item{flex-basis:100%}
+  .pz-row{align-items:stretch}
+  .pz-country{max-width:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .pz-card,.pz-slate{animation:none}
+  .pz-go:hover:not(:disabled){transform:none}
+  .pz-model:hover{transform:none}
+}
+`;
+
+
+const __root = ReactDOM.createRoot(document.getElementById("root"));
+__root.render(<ProlanzContentEngine />);
+</script>
+</body>
+</html>
