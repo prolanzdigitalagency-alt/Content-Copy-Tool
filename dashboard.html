@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+:root{
+  --bg:#1b0f2e; --bg2:#150a24; --surface:#271640; --surface2:#33205a;
+  --line:rgba(245,238,226,0.10); --text:#F4EEE2; --muted:#AC96CE;
+  --lime:#CDFF57; --coral:#FF5C7A; --ink:#160b26;
+}
+*{box-sizing:border-box}
+body{margin:0; min-height:100vh; font-family:system-ui,-apple-system,sans-serif; color:var(--text);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(255,92,122,0.14), transparent 55%),
+    radial-gradient(120% 80% at 0% 100%, rgba(205,255,87,0.10), transparent 55%),
+    var(--bg);
+  padding:28px 18px 60px;
+}
+.wrap{max-width:820px; margin:0 auto}
+.top{display:flex; align-items:center; justify-content:space-between; margin-bottom:28px}
+h1{font-size:28px; margin:0; font-weight:800}
+.email{font-size:13px; color:var(--muted)}
+.out{background:none; border:1px solid var(--line); color:var(--muted); border-radius:9px; padding:9px 14px; font-size:13px; cursor:pointer}
+.out:hover{color:var(--coral); border-color:rgba(255,92,122,.4)}
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+@media (max-width:560px){.grid{grid-template-columns:1fr}}
+.tile{background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:24px; text-decoration:none; color:var(--text); display:block; transition:.15s}
+.tile:hover{border-color:rgba(205,255,87,.4); transform:translateY(-2px)}
+.tile h2{margin:0 0 8px; font-size:20px; font-weight:700}
+.tile p{margin:0; color:var(--muted); font-size:14px; line-height:1.5}
+.badge{display:inline-block; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--lime); background:rgba(205,255,87,.1); border:1px solid rgba(205,255,87,.3); padding:4px 10px; border-radius:999px; margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Your tools</h1>
+    <div style="display:flex; align-items:center; gap:12px">
+      <span class="email" id="email"></span>
+      <button class="out" id="signout">Sign out</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <a class="tile" href="content-engine.html">
+      <h2>Content Engine</h2>
+      <p>Create skits, reels, POVs, carousels, posts and promo scripts. Spy any brand's live ads. Decode why a post went viral.</p>
+      <span class="badge">Open</span>
+    </a>
+    <a class="tile" href="copywriter.html">
+      <h2>Copywriter</h2>
+      <p>Ad copy, VSLs, flyers and landing pages, grounded in what's winning right now. Get creative direction for any script.</p>
+      <span class="badge">Open</span>
+    </a>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+sb.auth.getSession().then(({ data }) => {
+  if (!data.session) {
+    window.location.href = "login.html";
+    return;
+  }
+  document.getElementById("email").textContent = data.session.user.email || "";
+});
+
+document.getElementById("signout").onclick = async () => {
+  await sb.auth.signOut();
+  window.location.href = "login.html";
+};
+</script>
+</body>
+</html>

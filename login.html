@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Sign in</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+:root{
+  --bg:#1b0f2e; --bg2:#150a24; --surface:#271640; --surface2:#33205a;
+  --line:rgba(245,238,226,0.10); --text:#F4EEE2; --muted:#AC96CE;
+  --lime:#CDFF57; --coral:#FF5C7A; --ink:#160b26;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  font-family:system-ui,-apple-system,sans-serif; color:var(--text);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(255,92,122,0.14), transparent 55%),
+    radial-gradient(120% 80% at 0% 100%, rgba(205,255,87,0.10), transparent 55%),
+    var(--bg);
+  padding:24px;
+}
+.card{max-width:380px; width:100%; background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:28px}
+h1{font-size:26px; margin:0 0 6px; font-weight:800}
+p.sub{color:var(--muted); font-size:14px; margin:0 0 22px}
+.tabs{display:flex; gap:6px; background:var(--bg2); border-radius:12px; padding:4px; margin-bottom:20px}
+.tab{flex:1; text-align:center; padding:9px; border-radius:9px; font-size:14px; font-weight:600; cursor:pointer; color:var(--muted)}
+.tab.on{background:var(--lime); color:var(--ink)}
+label{display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px}
+input{width:100%; background:var(--bg2); border:1px solid var(--line); border-radius:10px; padding:11px 13px; color:var(--text); font-size:15px}
+input:focus{outline:none; border-color:var(--coral)}
+button.go{width:100%; margin-top:20px; background:var(--coral); color:#2a0a14; border:none; border-radius:12px; padding:13px; font-weight:700; font-size:15px; cursor:pointer}
+button.go:disabled{opacity:.5; cursor:default}
+.msg{margin-top:14px; font-size:13px; line-height:1.4; padding:10px 12px; border-radius:10px}
+.msg.err{background:rgba(255,92,122,.12); border:1px solid rgba(255,92,122,.4); color:#ffd0da}
+.msg.ok{background:rgba(205,255,87,.1); border:1px solid rgba(205,255,87,.3); color:var(--text)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Welcome</h1>
+  <p class="sub">Sign in or create an account to use the tools.</p>
+  <div class="tabs">
+    <div class="tab on" id="tabIn">Log in</div>
+    <div class="tab" id="tabUp">Sign up</div>
+  </div>
+  <label>Email</label>
+  <input type="email" id="email" placeholder="you@example.com" />
+  <label>Password</label>
+  <input type="password" id="password" placeholder="••••••••" />
+  <button class="go" id="go">Log in</button>
+  <div id="out"></div>
+</div>
+
+<script>
+// ── TODO: fill these in from your Supabase project settings ──
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
+// The anon key is safe to expose in frontend code; that is how Supabase is designed to be used.
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let mode = "in"; // "in" | "up"
+const tabIn = document.getElementById("tabIn");
+const tabUp = document.getElementById("tabUp");
+const go = document.getElementById("go");
+const out = document.getElementById("out");
+
+function setMode(m){
+  mode = m;
+  tabIn.classList.toggle("on", m === "in");
+  tabUp.classList.toggle("on", m === "up");
+  go.textContent = m === "in" ? "Log in" : "Create account";
+  out.innerHTML = "";
+}
+tabIn.onclick = () => setMode("in");
+tabUp.onclick = () => setMode("up");
+
+// If already signed in, skip straight to the dashboard.
+sb.auth.getSession().then(({ data }) => {
+  if (data.session) window.location.href = "dashboard.html";
+});
+
+go.onclick = async () => {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  if (!email || !password) {
+    out.innerHTML = '<div class="msg err">Enter an email and password.</div>';
+    return;
+  }
+  go.disabled = true;
+  out.innerHTML = '<div class="msg ok">Working…</div>';
+  try {
+    if (mode === "in") {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      window.location.href = "dashboard.html";
+    } else {
+      const { error } = await sb.auth.signUp({ email, password });
+      if (error) throw error;
+      out.innerHTML = '<div class="msg ok">Account created. Check your email to confirm, then log in.</div>';
+      setMode("in");
+    }
+  } catch (e) {
+    out.innerHTML = '<div class="msg err">' + (e.message || "Something went wrong.") + '</div>';
+  } finally {
+    go.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
