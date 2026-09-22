@@ -77,10 +77,24 @@ function setMode(m){
 tabIn.onclick = () => setMode("in");
 tabUp.onclick = () => setMode("up");
 
-// If already signed in, skip straight to the dashboard.
-sb.auth.getSession().then(({ data }) => {
-  if (data.session) window.location.href = "dashboard.html";
-});
+function showMaintenance(msg) {
+  document.querySelector(".card").innerHTML =
+    '<div style="text-align:center;padding:8px"><div style="font-size:40px;margin-bottom:12px">\uD83D\uDD27</div><div style="font-size:20px;font-weight:800;margin-bottom:8px">Back shortly</div><div style="color:var(--muted);line-height:1.5">' + msg + '</div></div>';
+}
+// Maintenance switch first, then the normal "already signed in?" check.
+sb.from("system_settings").select("maintenance_mode, maintenance_message").eq("id", 1).single()
+  .then(({ data }) => {
+    if (data && data.maintenance_mode) {
+      showMaintenance(data.maintenance_message || "We are upgrading the tools. Back shortly.");
+      return;
+    }
+    return sb.auth.getSession().then(({ data }) => {
+      if (data.session) window.location.href = "dashboard.html";
+    });
+  })
+  .catch(() => sb.auth.getSession().then(({ data }) => {
+    if (data.session) window.location.href = "dashboard.html";
+  }));
 
 go.onclick = async () => {
   const email = document.getElementById("email").value.trim();
