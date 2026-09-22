@@ -8,7 +8,7 @@
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
-<style>html,body{margin:0;padding:0}#gate{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1b0f2e;color:#F4EEE2;font-family:system-ui,sans-serif;font-size:15px}</style>
+<style>html,body{margin:0;padding:0}#root{display:none}#gate{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1b0f2e;color:#F4EEE2;font-family:system-ui,sans-serif;font-size:15px}</style>
 </head>
 <body>
 <div id="gate">Checking your session…</div>
@@ -22,15 +22,29 @@ const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 window.__SB_SESSION__ = null;
 
-sb.auth.getSession().then(({ data }) => {
-  if (!data.session) {
-    window.location.href = "login.html";
-    return;
-  }
-  window.__SB_SESSION__ = data.session;
-  document.getElementById("gate").style.display = "none";
-  document.getElementById("root").style.display = "block";
-});
+function showMaintenance(msg) {
+  const g = document.getElementById("gate");
+  g.innerHTML = '<div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:40px;margin-bottom:12px">\uD83D\uDD27</div><div style="font-size:20px;font-weight:700;margin-bottom:8px">Back shortly</div><div style="color:#AC96CE;line-height:1.5">' + msg + '</div></div>';
+  g.style.display = "flex";
+}
+function proceed() {
+  sb.auth.getSession().then(({ data }) => {
+    if (!data.session) {
+      window.location.href = "login.html";
+      return;
+    }
+    window.__SB_SESSION__ = data.session;
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("root").style.display = "block";
+  });
+}
+// Maintenance switch first: if we're mid-repair, show "back shortly" and stop.
+sb.from("system_settings").select("maintenance_mode, maintenance_message").eq("id", 1).single()
+  .then(({ data }) => {
+    if (data && data.maintenance_mode) showMaintenance(data.maintenance_message || "We are upgrading the tools. Back shortly.");
+    else proceed();
+  })
+  .catch(proceed);
 </script>
 
 <script type="text/babel" data-presets="react">
@@ -198,6 +212,49 @@ function ideaToText(idea) {
   return lines.join("\n");
 }
 
+
+// Starts an ad search on our backend (Apify runs it in the background) and
+// checks back every few seconds until the results are ready. Never waits
+// inside the backend's 10-second window.
+async function runAdSearch({ platform, q, country, limit }, onStatus) {
+  const token = (window.__SB_SESSION__ && window.__SB_SESSION__.access_token) || "";
+  const headers = { "Content-Type": "application/json", Authorization: "Bearer " + token };
+  const startRes = await fetch("/api/ads", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ platform, q, country, limit }),
+  });
+  let startData = null;
+  try { startData = await startRes.json(); } catch (e) {}
+  if (!startRes.ok) throw new Error((startData && startData.error) || "HTTP " + startRes.status);
+  const { runId, datasetId } = startData;
+  const started = Date.now();
+  const deadline = started + 120000; // up to 2 minutes
+  let first = true;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, first ? 4000 : 3000));
+    first = false;
+    if (onStatus) onStatus(`Searching the ad library… ${Math.round((Date.now() - started) / 1000)}s`);
+    const sRes = await fetch(
+      `/api/ads-status?runId=${encodeURIComponent(runId)}&datasetId=${encodeURIComponent(datasetId)}`,
+      { headers: { Authorization: "Bearer " + token } }
+    );
+    let sData = null;
+    try { sData = await sRes.json(); } catch (e) {}
+    if (!sRes.ok) throw new Error((sData && sData.error) || "HTTP " + sRes.status);
+    if (sData.status === "done") return sData.items || [];
+    if (sData.status === "failed") throw new Error(sData.error || "The ad search didn't complete.");
+  }
+  throw new Error("The ad search took too long. Try again or use a narrower keyword.");
+}
+
+// Trims raw ad records so they fit comfortably in one Claude call.
+function compactAds(items, max = 25, charCap = 12000) {
+  let s = JSON.stringify((items || []).slice(0, max));
+  if (s.length > charCap) s = s.slice(0, charCap) + "…]";
+  return s;
+}
+
 function ProlanzContentEngine() {
   const [appMode, setAppMode] = useState("create"); // 'create' | 'spy'
 
@@ -266,34 +323,38 @@ function ProlanzContentEngine() {
     setSpyLoading(true);
     setSpyError("");
     setSpyAds([]);
-    setSpyStatus(`Searching the ${plat.label} ad library…`);
+    setSpyStatus(`Starting the ${plat.label} ad search…`);
     try {
+      const items = await runAdSearch(
+        { platform: spyPlatform, q: brand.trim(), country: spyCountry.trim() || undefined, limit: 30 },
+        (st) => setSpyStatus(st)
+      );
+      if (!items.length) {
+        setSpyError(`No active ads found for "${brand.trim()}". Try the exact page name / handle.`);
+        return;
+      }
+      setSpyStatus("Reading the ads…");
       const raw = await withRetry(() =>
-        smartCall(
-          [
-            {
-              role: "user",
-              content: `Use the Markifact connector to pull the ads the brand "${brand.trim()}" is CURRENTLY running on ${plat.label}. Call the ${plat.op} operation (search by this brand name, active ads only, group similar ads, a small limit${spyCountry.trim() ? `, country '${spyCountry.trim().toUpperCase()}'` : ""}). If the results are saved to a file, read the file to extract the ads.
+        smartCall([
+          {
+            role: "user",
+            content: `Below are raw ad records pulled from the ${plat.label} ad library for "${brand.trim()}". Field names vary by source, read them carefully.
 
-Then return ONLY a compact JSON array (max 5 items), no prose, no markdown:
+RAW ADS:
+${compactAds(items)}
+
+Return ONLY a compact JSON array (max 6 items), no prose, no markdown. Prefer ads that have been running longest:
 [{"brand":"advertiser/page name","format":"video | image | carousel | text","hook":"opening line or on-screen hook","primaryText":"main ad copy, <= 25 words","cta":"the call-to-action button","angle":"persuasion angle in 3-6 words","platforms":"where it runs","started":"start date if known"}]
-If there are no active ads, return [].`,
-            },
-          ],
-          undefined,
-          [MARKIFACT]
-        )
+If nothing usable, return [].`,
+          },
+        ])
       );
       const ads = parseArray(raw);
       setSpyAds(ads);
       if (!ads.length)
-        setSpyError(
-          `No active ads found for "${brand.trim()}". Try the exact page name / handle, or switch platform.`
-        );
+        setSpyError(`Found ads for "${brand.trim()}" but couldn't summarise them. Try again.`);
     } catch (e) {
-      setSpyError(
-        "Couldn't reach the ad library: " + ((e && e.message) || String(e))
-      );
+      setSpyError("Ad search failed: " + ((e && e.message) || String(e)));
     } finally {
       setSpyLoading(false);
       setSpyStatus("");
