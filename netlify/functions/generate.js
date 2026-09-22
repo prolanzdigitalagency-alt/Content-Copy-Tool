@@ -44,6 +44,19 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
   }
 
+  // 0. Maintenance switch: refuse cleanly if we're mid-repair, before anything else.
+  const { data: settings } = await supabaseAdmin
+    .from("system_settings")
+    .select("maintenance_mode, maintenance_message")
+    .eq("id", 1)
+    .single();
+  if (settings && settings.maintenance_mode) {
+    return {
+      statusCode: 503,
+      body: JSON.stringify({ maintenance: true, error: settings.maintenance_message }),
+    };
+  }
+
   // 1. Identify the user from their Supabase session token.
   const authHeader = event.headers.authorization || event.headers.Authorization || "";
   const token = authHeader.replace("Bearer ", "");
