@@ -63,13 +63,26 @@ const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
 const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-sb.auth.getSession().then(({ data }) => {
-  if (!data.session) {
-    window.location.href = "login.html";
-    return;
-  }
-  document.getElementById("email").textContent = data.session.user.email || "";
-});
+function showMaintenance(msg) {
+  document.querySelector(".wrap").innerHTML =
+    '<div style="text-align:center;padding:60px 20px"><div style="font-size:40px;margin-bottom:12px">\uD83D\uDD27</div><div style="font-size:24px;font-weight:800;margin-bottom:8px">Back shortly</div><div style="color:var(--muted);line-height:1.5;max-width:420px;margin:0 auto">' + msg + '</div></div>';
+}
+function proceed() {
+  sb.auth.getSession().then(({ data }) => {
+    if (!data.session) {
+      window.location.href = "login.html";
+      return;
+    }
+    document.getElementById("email").textContent = data.session.user.email || "";
+  });
+}
+// Maintenance switch first.
+sb.from("system_settings").select("maintenance_mode, maintenance_message").eq("id", 1).single()
+  .then(({ data }) => {
+    if (data && data.maintenance_mode) showMaintenance(data.maintenance_message || "We are upgrading the tools. Back shortly.");
+    else proceed();
+  })
+  .catch(proceed);
 
 document.getElementById("signout").onclick = async () => {
   await sb.auth.signOut();
