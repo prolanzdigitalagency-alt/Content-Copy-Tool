@@ -20,6 +20,7 @@ const SUPABASE_URL = "https://pnqyfiyibczzdnjtyggs.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBucXlmaXlpYmN6emRuanR5Z2dzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwODQ4MTgsImV4cCI6MjEwNTY2MDgxOH0.RmMYhEh--_Zv-R4ptojlLu9Z1KA_I_nwfDR-VkHa0-s";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+window.__SB__ = sb;
 window.__SB_SESSION__ = null;
 
 function showMaintenance(msg) {
@@ -87,9 +88,8 @@ const PLATFORMS = [
 
 // Ad-library spy platforms -> Markifact operation ids
 const SPY_PLATFORMS = [
-  { id: "meta", label: "Meta (FB/IG)", op: "meta_ads_library" },
-  { id: "tiktok", label: "TikTok", op: "tiktok_ads_library" },
-  { id: "linkedin", label: "LinkedIn", op: "linkedin_ads_library" },
+  { id: "meta", label: "Meta (FB/IG)" },
+  { id: "tiktok", label: "TikTok" },
 ];
 
 const MARKIFACT = {
@@ -253,6 +253,58 @@ function compactAds(items, max = 25, charCap = 12000) {
   let s = JSON.stringify((items || []).slice(0, max));
   if (s.length > charCap) s = s.slice(0, charCap) + "…]";
   return s;
+}
+
+
+// Turns the model's markdown-ish output into clean React nodes:
+// **bold** and *bold* become real bold, stray asterisks are removed.
+function renderRich(text) {
+  if (text == null) return null;
+  const str = String(text);
+  const parts = str.split(/(\*\*[^*]+\*\*|\*[^*\n]+\*)/g);
+  return parts.map((p, i) => {
+    if (/^\*\*[^*]+\*\*$/.test(p)) return React.createElement("strong", { key: i }, p.slice(2, -2));
+    if (/^\*[^*\n]+\*$/.test(p)) return React.createElement("strong", { key: i }, p.slice(1, -1));
+    return p.replace(/\*+/g, "");
+  });
+}
+
+
+// Notify-when-done: asks permission the first time, then pings on completion
+// (only fires if the tab isn't focused, so it doesn't nag during active use).
+function notifyDone(title, body) {
+  try {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      if (document.hidden) new Notification(title, { body });
+    } else if (Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  } catch (e) {}
+}
+
+
+function TopBar() {
+  const [open, setOpen] = useState(false);
+  async function signOut() {
+    try { await window.__SB__.auth.signOut(); } catch (e) {}
+    window.location.href = "login.html";
+  }
+  return (
+    <div className="pz-topbar">
+      <button className="pz-burger" onClick={() => setOpen((o) => !o)} aria-label="Menu">{"\u2630"}</button>
+      {open && <div className="pz-scrim" onClick={() => setOpen(false)} />}
+      {open && (
+        <div className="pz-menu">
+          <a href="dashboard.html">All tools</a>
+          <a href="content-engine.html">Content Engine</a>
+          <a href="copywriter.html">Copywriter</a>
+          <hr />
+          <button onClick={signOut}>Sign out</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ProlanzContentEngine() {
@@ -580,6 +632,7 @@ Give an HONEST virality estimate 0-100 based on how strong the mechanic + hook a
       if (myRun === runId.current) {
         setLoading(false);
         setStatus("");
+        notifyDone("Your ideas are ready", "Prolanz Content Engine");
       }
     }
   }
@@ -714,6 +767,7 @@ Use the section shape from the playbook for the chosen type. meta can be an empt
   return (
     <div className="pz-root">
       <style>{CSS}</style>
+      <TopBar />
 
       <header className="pz-head">
         <div className="pz-eyebrow">PROLANZ&nbsp;DIGITALS&nbsp;·&nbsp;CONTENT&nbsp;OPS</div>
@@ -1201,7 +1255,7 @@ function SpyCard({ ad, index, onModel }) {
       {ad.primaryText && (
         <div className="pz-block">
           <div className="pz-block-tag">AD COPY</div>
-          <p className="pz-text">{ad.primaryText}</p>
+          <p className="pz-text">{renderRich(ad.primaryText)}</p>
         </div>
       )}
 
@@ -1268,12 +1322,12 @@ function IdeaCard({ idea, index, onCopy }) {
               {s.items.map((it, i) => (
                 <li key={i}>
                   <span className="pz-list-n">{String(i + 1).padStart(2, "0")}</span>
-                  <span>{it}</span>
+                  <span>{renderRich(it)}</span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p className="pz-text">{s.text}</p>
+            <p className="pz-text">{renderRich(s.text)}</p>
           )}
         </div>
       ))}
@@ -1419,6 +1473,26 @@ const CSS = `
   .pz-meta-item{flex-basis:100%}
   .pz-row{align-items:stretch}
   .pz-country{max-width:none}
+}
+
+.pz-topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:12px;max-width:860px;margin:0 auto 8px;padding:10px 6px}
+.pz-burger{background:var(--surface);border:1px solid var(--line);color:var(--text);width:42px;height:42px;border-radius:12px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.pz-burger:hover{border-color:var(--lime)}
+.pz-menu{position:absolute;top:56px;left:6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:6px;min-width:200px;box-shadow:0 16px 40px rgba(0,0,0,.4)}
+.pz-menu a,.pz-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-family:'Instrument Sans',system-ui,sans-serif;font-size:14.5px;padding:11px 13px;border-radius:9px;cursor:pointer;text-decoration:none}
+.pz-menu a:hover,.pz-menu button:hover{background:var(--surface2)}
+.pz-menu hr{border:none;border-top:1px solid var(--line);margin:5px 0}
+.pz-scrim{position:fixed;inset:0;z-index:40}
+
+@media (max-width:640px){
+  .pz-root{padding:16px 12px 56px}
+  .pz-title{font-size:clamp(34px,11vw,52px)}
+  .pz-topbar{padding:8px 2px}
+  .pz-two{flex-direction:column;gap:0}
+  .pz-panel{padding:16px}
+  .pz-card{padding:18px}
+  .pz-cardbtns{width:100%}
+  .pz-go{font-size:16px}
 }
 @media (prefers-reduced-motion:reduce){
   .pz-card,.pz-slate{animation:none}
